@@ -34,7 +34,10 @@ class Disco:
 
     @property
     def etiqueta(self):
-        partes = [self.modelo or self.nombre, formato.capacidad(self.tamano), self.ruta]
+        partes = [self.modelo or self.nombre]
+        if self.tamano is not None:
+            partes.append(formato.capacidad(self.tamano))
+        partes.append(self.ruta)
         texto = " · ".join(partes)
         if self.es_sistema:
             texto += " · disco del sistema"

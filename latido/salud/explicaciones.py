@@ -30,7 +30,7 @@ def describir_advertencia_critica(valor):
 
 
 def _unidades(valor):
-    return f"{valor:,} unidades ({formato.terabytes(formato.unidades_nvme_a_tb(valor))})"
+    return f"{formato.terabytes(formato.unidades_nvme_a_tb(valor))} ({valor:,} unidades)"
 
 
 def _minutos(valor):
