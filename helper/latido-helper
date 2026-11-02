@@ -1,0 +1,121 @@
+#!/usr/bin/python3 -I
+"""latido-helper: lee la salud SMART de un disco NVMe. Solo lectura.
+
+Única forma aceptada:
+
+    latido-helper leer <disco>
+
+donde <disco> coincide exactamente con /dev/nvmeN o /dev/nvmeNnM.
+Lo ejecuta pkexec como root, siempre desde /usr/libexec/latido/.
+
+Ejecuta exactamente:  /usr/bin/smartctl --json=c -x <disco>
+Escribe en stdout:    {"smartctl_exit": N, "datos": {...}}
+o, si smartctl no devolvió JSON válido:
+                      {"smartctl_exit": N, "datos": null, "salida_invalida": true}
+
+Sale con 0 si smartctl llegó a ejecutarse, aunque el disco reporte problemas.
+Sus propios errores usan los códigos de abajo; nunca 126 ni 127, que pkexec
+reserva para "diálogo cancelado" y "no autorizado o error" (man pkexec).
+"""
+
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+
+SMARTCTL = "/usr/bin/smartctl"
+PATRON_DISCO = re.compile(r"/dev/nvme[0-9]+(n[0-9]+)?")
+TIEMPO_MAXIMO = 60  # segundos
+ENTORNO = {"LC_ALL": "C"}
+
+SALIDA_OK = 0
+SALIDA_USO = 2
+SALIDA_DISPOSITIVO = 3
+SALIDA_SIN_SMARTCTL = 4
+SALIDA_TIEMPO = 5
+SALIDA_EJECUCION = 6
+
+
+class ErrorHelper(Exception):
+    def __init__(self, codigo, mensaje):
+        super().__init__(mensaje)
+        self.codigo = codigo
+        self.mensaje = mensaje
+
+
+def validar_argumentos(argv):
+    """Devuelve el disco si argv es exactamente ["leer", <disco válido>]."""
+    if len(argv) != 2 or argv[0] != "leer":
+        raise ErrorHelper(SALIDA_USO, "uso: latido-helper leer /dev/nvmeN[nM]")
+    disco = argv[1]
+    # fullmatch: sin "^...$" de re, que aceptaría un salto de línea al final.
+    if PATRON_DISCO.fullmatch(disco) is None:
+        raise ErrorHelper(SALIDA_USO, f"disco no permitido: {disco!r}")
+    return disco
+
+
+def validar_dispositivo(disco, lstat=None):
+    """Exige un dispositivo de bloque o de caracteres real, no un symlink."""
+    lstat = lstat or os.lstat
+    try:
+        modo = lstat(disco).st_mode
+    except OSError as error:
+        raise ErrorHelper(SALIDA_DISPOSITIVO, f"no se pudo acceder a {disco}: {error.strerror}")
+    if not (stat.S_ISBLK(modo) or stat.S_ISCHR(modo)):
+        raise ErrorHelper(SALIDA_DISPOSITIVO, f"{disco} no es un dispositivo de bloque ni de caracteres")
+
+
+def construir_comando(disco):
+    return [SMARTCTL, "--json=c", "-x", disco]
+
+
+def smartctl_disponible():
+    return os.access(SMARTCTL, os.X_OK)
+
+
+def ejecutar_smartctl(disco, run=None):
+    run = run or subprocess.run
+    if not smartctl_disponible():
+        raise ErrorHelper(SALIDA_SIN_SMARTCTL, f"no se encontró {SMARTCTL}")
+    try:
+        proceso = run(
+            construir_comando(disco),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=ENTORNO,
+            timeout=TIEMPO_MAXIMO,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise ErrorHelper(SALIDA_TIEMPO, f"smartctl no terminó en {TIEMPO_MAXIMO} segundos")
+    except OSError as error:
+        raise ErrorHelper(SALIDA_EJECUCION, f"no se pudo ejecutar smartctl: {error.strerror}")
+
+    try:
+        datos = json.loads(proceso.stdout)
+    except ValueError:
+        datos = None
+    if not isinstance(datos, dict):
+        return {"smartctl_exit": proceso.returncode, "datos": None, "salida_invalida": True}
+    return {"smartctl_exit": proceso.returncode, "datos": datos}
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    try:
+        disco = validar_argumentos(argv)
+        validar_dispositivo(disco)
+        resultado = ejecutar_smartctl(disco)
+    except ErrorHelper as error:
+        print(f"latido-helper: {error.mensaje}", file=sys.stderr)
+        return error.codigo
+    json.dump(resultado, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    return SALIDA_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())
