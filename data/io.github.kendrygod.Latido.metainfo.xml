@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.kendrygod.Latido</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Latido</name>
+  <summary>Salud y velocidad de tus discos</summary>
+  <description>
+    <p>
+      Latido lee los datos SMART de un disco y te dice, con un color, si
+      conviene confiar en él: azul es bueno, amarillo es riesgo y rojo es
+      evitar. Si no hay datos suficientes, el estado es desconocido (gris),
+      nunca bueno.
+    </p>
+    <p>
+      La lectura es solo de lectura: Latido no escribe ni cambia nada en el
+      disco. SMART mide el daño acumulado; no predice fallas.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.kendrygod.Latido.desktop</launchable>
+
+  <developer id="io.github.kendrygod">
+    <name>Kendry</name>
+  </developer>
+
+  <url type="homepage">https://github.com/KendryGod/latido</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.0.1" date="2026-11-02">
+      <description>
+        <p>Primera versión de desarrollo: salud de discos NVMe.</p>
+      </description>
+    </release>
+  </releases>
+</component>

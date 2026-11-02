@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Latido
+Comment=Revisa la salud y la velocidad de tus discos
+Exec=latido
+Terminal=false
+Categories=System;Monitor;
+Keywords=disco;SSD;NVMe;SMART;salud;
+StartupNotify=true

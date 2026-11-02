@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "latido"
+version = "0.0.1"
+description = "Salud y velocidad de discos en Linux"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Kendry" }]
+# PyGObject, GTK 4 y libadwaita vienen de los paquetes de Fedora
+# (python3-gobject, gtk4, libadwaita); no se instalan con pip.
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: X11 Applications :: GTK",
+    "Topic :: System :: Hardware",
+]
+
+[project.urls]
+Homepage = "https://github.com/KendryGod/latido"
+
+[project.scripts]
+latido = "latido.app:main"
+
+[tool.setuptools.packages.find]
+include = ["latido*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
