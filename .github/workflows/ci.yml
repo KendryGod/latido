@@ -1,0 +1,36 @@
+# NO PROBADO hasta el primer push.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Instalar dependencias
+        run: >
+          dnf install -y
+          git tar
+          python3 python3-pytest python3-pyflakes python3-gobject
+          gtk4 libadwaita util-linux
+          xorg-x11-server-Xvfb xorg-x11-xauth mesa-dri-drivers
+          desktop-file-utils appstream libxml2 polkit
+
+      - uses: actions/checkout@v4
+
+      - name: pyflakes
+        run: python3 -m pyflakes latido tests helper/latido-helper
+
+      - name: pytest con pantalla virtual
+        env:
+          REQUIRE_DISPLAY: "1"
+        run: xvfb-run -a python3 -m pytest -v
+
+      - name: Validar desktop, metainfo y política
+        run: |
+          desktop-file-validate data/io.github.kendrygod.Latido.desktop
+          appstreamcli validate --no-net data/io.github.kendrygod.Latido.metainfo.xml
+          xmllint --noout --nonet --dtdvalid /usr/share/polkit-1/policyconfig-1.dtd data/io.github.kendrygod.latido.policy
