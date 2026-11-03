@@ -49,19 +49,19 @@ def _numero(valor, decimales=0):
 
 
 def cifras_clave(informe):
-    """Temperatura, vida usada, reserva disponible, horas encendido, datos escritos y errores de medios."""
+    """Temperatura, vida usada, repuesto disponible, horas encendido, datos escritos y errores de medio."""
     filas = [
         ("temperatura", "Temperatura", informe.temperatura, _numero(informe.temperatura), "°C", False,
          _umbrales_temperatura(informe)),
         ("vida", "Vida usada", informe.uso_pct, _numero(informe.uso_pct), "%", False,
          None if informe.vida_pct is None else f"Estimación del propio disco. Queda {informe.vida_pct} %."),
-        ("reserva", "Reserva disponible", informe.repuesto_pct, _numero(informe.repuesto_pct), "%", False,
+        ("reserva", "Repuesto disponible", informe.repuesto_pct, _numero(informe.repuesto_pct), "%", False,
          None if informe.repuesto_umbral_pct is None else f"Umbral del disco: {informe.repuesto_umbral_pct} %"),
         ("horas", "Horas encendido", informe.horas, _numero(informe.horas), "h", True,
          None if informe.ciclos is None else f"{informe.ciclos:,} ciclos de encendido"),
         ("escritos", "Datos escritos", informe.tb_escritos, _numero(informe.tb_escritos, 2), "TB", True,
          None if informe.tb_leidos is None else f"Leídos: {formato.terabytes(informe.tb_leidos)}"),
-        ("errores", "Errores de medios", informe.errores_medio, _numero(informe.errores_medio), "", False,
+        ("errores", "Errores de medio", informe.errores_medio, _numero(informe.errores_medio), "", False,
          "Datos que el disco no pudo corregir"),
     ]
     return [

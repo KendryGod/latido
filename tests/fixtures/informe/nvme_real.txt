@@ -18,6 +18,20 @@ SALUD: Bueno
   - Repuesto disponible: 100 % (umbral 10 %).
   - Vida estimada restante: 99 %.
 
+CIFRAS CLAVE
+  Temperatura:          46 °C · Normal
+                        Umbrales del disco: advertencia 83 °C · crítica 90 °C
+  Vida usada:           1 % · Normal
+                        Estimación del propio disco. Queda 99 %.
+  Repuesto disponible:  100 % · Normal
+                        Umbral del disco: 10 %
+  Horas encendido:      4,921 h · Informativo
+                        934 ciclos de encendido
+  Datos escritos:       13.08 TB · Informativo
+                        Leídos: 16.60 TB
+  Errores de medio:     0 · Normal
+                        Datos que el disco no pudo corregir
+
 AUTENTICIDAD: No concluyente
   Por qué:
   - La capacidad coincide en smartctl y en el kernel: 1.00 TB (1,000,204,886,016
@@ -29,20 +43,6 @@ AUTENTICIDAD: No concluyente
   - Que el modelo y la capacidad que informa el disco sean ciertos: Latido solo
     compara lo que dicen dos fuentes del propio sistema.
   - Una prueba de velocidad sola no prueba la autenticidad.
-
-CIFRAS CLAVE
-  Temperatura:          46 °C · Normal
-                        Umbrales del disco: advertencia 83 °C · crítica 90 °C
-  Vida usada:           1 % · Normal
-                        Estimación del propio disco. Queda 99 %.
-  Reserva disponible:   100 % · Normal
-                        Umbral del disco: 10 %
-  Horas encendido:      4,921 h · Informativo
-                        934 ciclos de encendido
-  Datos escritos:       13.08 TB · Informativo
-                        Leídos: 16.60 TB
-  Errores de medios:    0 · Normal
-                        Datos que el disco no pudo corregir
 
 TODOS LOS DATOS
   Registro de salud NVMe:

@@ -252,10 +252,10 @@ def test_cargar_fixture_errores(tmp_path):
 # --- Argumentos ------------------------------------------------------------------
 
 def test_argumentos():
-    assert interpretar_argumentos([]) == (False, None)
-    assert interpretar_argumentos(["--desde-fixture", "a.json"]) == (False, "a.json")
-    assert interpretar_argumentos(["--desde-fixture=a.json"]) == (False, "a.json")
-    assert interpretar_argumentos(["--ayuda"]) == (True, None)
+    assert interpretar_argumentos([]) == (False, None, None)
+    assert interpretar_argumentos(["--desde-fixture", "a.json"]) == (False, "a.json", None)
+    assert interpretar_argumentos(["--desde-fixture=a.json"]) == (False, "a.json", None)
+    assert interpretar_argumentos(["--ayuda"]) == (True, None, None)
     for malos in (["--desde-fixture"], ["--desde-fixture="], ["--otro"]):
         with pytest.raises(ErrorArgumentos):
             interpretar_argumentos(malos)

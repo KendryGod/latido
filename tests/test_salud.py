@@ -180,7 +180,7 @@ def test_sin_critical_warning_y_smart_aprobado_es_desconocido(base_sintetica):
     del _log(base_sintetica)["critical_warning"]
     informe = analizar(base_sintetica)
     assert informe.estado is Estado.DESCONOCIDO
-    assert any("critical_warning" in m for m in informe.motivos)
+    assert any("Faltan datos: advertencia crítica" in m for m in informe.motivos)  # el nombre que se ve en «Todos los datos»
 
 
 def test_critical_warning_0_pero_smartctl_dice_falla_es_malo(base_sintetica):

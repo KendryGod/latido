@@ -50,7 +50,7 @@ CLASES_ESTADO = [clase for _, clase, _, _ in APARIENCIA.values()]
 
 NOTA = (
     "SMART mide el daño que el disco ha acumulado; no predice fallas. "
-    "Las reglas de color son criterio propio de Latido."
+    "Cada razón dice su fuente, o que es criterio de Latido."
 )
 
 ANCHO_CONTENIDO = 760  # Adw.Clamp (docs/diseno.md)
@@ -266,6 +266,17 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self._filas_motivos = []
         caja.append(self.grupo_motivos)
 
+        # Cifras clave: número grande, unidad y estado propio.
+        self.grid_cifras = Gtk.FlowBox(
+            selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=2,
+            max_children_per_line=3, column_spacing=12, row_spacing=12,
+        )
+        self.cifras = {}
+        for cifra in cifras_clave(InformeSalud()):
+            self.cifras[cifra.clave] = TarjetaCifra(cifra)
+            self.grid_cifras.append(self.cifras[cifra.clave])
+        caja.append(self.grid_cifras)
+
         # Autenticidad: una etiqueta aparte, que nunca cambia el color de salud.
         self.grupo_autenticidad = Adw.PreferencesGroup(title="Autenticidad")
         self.fila_autenticidad = Adw.ActionRow(use_markup=False, subtitle_lines=0)
@@ -277,17 +288,6 @@ class PaginaSalud(Gtk.ScrolledWindow):
             self.fila_no_comprobado.add_row(_fila(texto))
         self.grupo_autenticidad.add(self.fila_no_comprobado)
         caja.append(self.grupo_autenticidad)
-
-        # Cifras clave: número grande, unidad y estado propio.
-        self.grid_cifras = Gtk.FlowBox(
-            selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=2,
-            max_children_per_line=3, column_spacing=12, row_spacing=12,
-        )
-        self.cifras = {}
-        for cifra in cifras_clave(InformeSalud()):
-            self.cifras[cifra.clave] = TarjetaCifra(cifra)
-            self.grid_cifras.append(self.cifras[cifra.clave])
-        caja.append(self.grid_cifras)
 
         # «Todos los datos», plegado.
         self.expansor = Gtk.Expander(expanded=False)

@@ -24,7 +24,7 @@ ATAJOS = {
 
 class VentanaPrincipal(Adw.ApplicationWindow):
     def __init__(self, discos, lector, error_deteccion=None, aviso_desarrollo=None, servicios_velocidad=None,
-                 detectar=None, demo=False, **kwargs):
+                 detectar=None, demo=False, velocidad_demo=None, **kwargs):
         super().__init__(title="Latido", default_width=ANCHO, default_height=ALTO, **kwargs)
         self.demo = demo
         self.set_size_request(ANCHO_MINIMO, ALTO_MINIMO)
@@ -35,7 +35,7 @@ class VentanaPrincipal(Adw.ApplicationWindow):
         self.pila = Adw.ViewStack()
         self.pagina_salud = PaginaSalud(discos, lector, error_deteccion, detectar=detectar)
         self.pila.add_titled_with_icon(self.pagina_salud, "salud", "Salud", "drive-harddisk-symbolic")
-        self.pagina_velocidad = PaginaVelocidad(servicios_velocidad)
+        self.pagina_velocidad = PaginaVelocidad(servicios_velocidad, demo=velocidad_demo)
         self.pila.add_titled_with_icon(self.pagina_velocidad, "velocidad", "Velocidad", "power-profile-performance-symbolic")
 
         self.cabecera = Adw.HeaderBar()

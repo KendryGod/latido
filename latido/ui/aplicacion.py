@@ -26,7 +26,27 @@ def disco_de_fixture(ruta):
     )
 
 
-def crear_ventana(aplicacion=None, ruta_fixture=None):
+def crear_ventana_demo(estado, aplicacion=None):
+    """Modo demo: datos de ejemplo, banner permanente, sin leer ningún disco ni ejecutar nada."""
+    from latido import demo
+
+    disco = demo.disco_demo()
+    ventana = VentanaPrincipal(
+        [disco],
+        lambda _disco: demo.informe_demo(estado),
+        aviso_desarrollo=demo.AVISO,
+        servicios_velocidad=demo.servicios_velocidad_demo(),
+        velocidad_demo=demo.velocidad_demo(),
+        demo=True,
+        application=aplicacion,
+    )
+    ventana.pagina_salud.mostrar_informe(demo.informe_demo(estado), disco)
+    return ventana
+
+
+def crear_ventana(aplicacion=None, ruta_fixture=None, estado_demo=None):
+    if estado_demo:
+        return crear_ventana_demo(estado_demo, aplicacion)
     if ruta_fixture:
         return VentanaPrincipal(
             [disco_de_fixture(ruta_fixture)],
@@ -49,10 +69,12 @@ def crear_ventana(aplicacion=None, ruta_fixture=None):
 
 
 class Aplicacion(Adw.Application):
-    def __init__(self, ruta_fixture=None):
-        flags = Gio.ApplicationFlags.NON_UNIQUE if ruta_fixture else Gio.ApplicationFlags.DEFAULT_FLAGS
+    def __init__(self, ruta_fixture=None, demo=None):
+        aparte = ruta_fixture or demo
+        flags = Gio.ApplicationFlags.NON_UNIQUE if aparte else Gio.ApplicationFlags.DEFAULT_FLAGS
         super().__init__(application_id=ID_APLICACION, flags=flags)
         self.ruta_fixture = ruta_fixture
+        self.demo = demo
 
     def do_startup(self):
         Adw.Application.do_startup(self)
@@ -68,7 +90,7 @@ class Aplicacion(Adw.Application):
             ventana.close()
 
     def do_activate(self):
-        ventana = self.get_active_window() or crear_ventana(self, self.ruta_fixture)
+        ventana = self.get_active_window() or crear_ventana(self, self.ruta_fixture, self.demo)
         ventana.present()
 
     def do_shutdown(self):

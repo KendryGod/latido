@@ -125,9 +125,10 @@ class CuadroPrueba(Gtk.Box):
 
 
 class PaginaVelocidad(Gtk.Box):
-    def __init__(self, servicios=None):
+    def __init__(self, servicios=None, demo=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.servicios = servicios or ServiciosVelocidad()
+        self.modo_demo = demo is not None  # demo: VelocidadMedida de ejemplo; nunca se ejecuta fio
         self.carpeta = None
         self.revision = None
         self.estado_fio = None
@@ -232,6 +233,12 @@ class PaginaVelocidad(Gtk.Box):
         caja.append(nota)
 
         self._actualizar_resumen()
+        if self.modo_demo:
+            self.velocidad_medida = demo
+            self.fila_carpeta.set_subtitle("Modo demo: no se mide nada")
+            self.mostrar_resultado(demo.resultado)
+            self._mostrar_mensaje("Resultados de ejemplo. En el modo demo no se ejecuta fio.")
+            self._actualizar_boton()
 
     # --- al abrir la pestaña ---
 
@@ -329,7 +336,9 @@ class PaginaVelocidad(Gtk.Box):
         configuracion = self.configuracion()
         maximo = configuracion.escritura_maxima
         self.fila_escritura.set_subtitle(f"{formato.tamano(maximo)} ({formato.gigabytes(maximo)}) como máximo")
-        if self.estado_fio is not None:
+        if self.modo_demo:
+            self.fila_fio.set_subtitle("En el modo demo no se ejecuta fio")
+        elif self.estado_fio is not None:
             if self.estado_fio.problemas:
                 self.fila_fio.set_subtitle("\n".join(self.estado_fio.problemas))
             else:
@@ -377,7 +386,8 @@ class PaginaVelocidad(Gtk.Box):
 
     def puede_empezar(self):
         return (
-            not self.en_marcha
+            not self.modo_demo
+            and not self.en_marcha
             and self.estado_fio is not None
             and self.estado_fio.listo
             and self.revision is not None
@@ -396,7 +406,7 @@ class PaginaVelocidad(Gtk.Box):
             self.boton.add_css_class("suggested-action")
             self.boton.set_sensitive(self.puede_empezar())
         for control in (self.boton_carpeta, self.fila_tamano, self.fila_pasadas):
-            control.set_sensitive(not self.en_marcha)
+            control.set_sensitive(not self.en_marcha and not self.modo_demo)
 
     def _mostrar_mensaje(self, texto):
         self.mensaje.set_text(texto)
@@ -485,11 +495,7 @@ class PaginaVelocidad(Gtk.Box):
             self._mostrar_mensaje("Prueba cancelada. " + resultado.limpieza.texto())
             self._marcar_sin_terminar()
         else:
-            for prueba in PRUEBAS:
-                for direccion in Direccion:
-                    resumen = resultado.resumen(prueba, direccion)
-                    if resumen is not None:
-                        self.cuadros[prueba.clave].columnas[direccion].mostrar(resumen, resultado.pasadas)
+            self.mostrar_resultado(resultado)
             info = self.revision.info if self.revision else None
             self.velocidad_medida = VelocidadMedida(resultado, self._configuracion_en_marcha,
                                                     info.tipo if info else None)
@@ -500,6 +506,13 @@ class PaginaVelocidad(Gtk.Box):
         for funcion in pendientes:
             funcion()
         return GLib.SOURCE_REMOVE
+
+    def mostrar_resultado(self, resultado):
+        for prueba in PRUEBAS:
+            for direccion in Direccion:
+                resumen = resultado.resumen(prueba, direccion)
+                if resumen is not None:
+                    self.cuadros[prueba.clave].columnas[direccion].mostrar(resumen, resultado.pasadas)
 
     def _marcar_sin_terminar(self):
         for cuadro in self.cuadros.values():

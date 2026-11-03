@@ -231,7 +231,7 @@ def _diagnosticar_nvme(informe, datos, mascara):
     smartctl_dice_falla = aprobado is False or bool(mascara & BIT_DISCO_FALLANDO)
 
     if advertencia is None:
-        faltan.append("advertencia crítica (critical_warning)")
+        faltan.append("advertencia crítica")
         if smartctl_dice_falla:
             malos.append(_disparo(
                 "NVME-FALLA-SIN-DETALLE",
@@ -277,7 +277,7 @@ def _diagnosticar_nvme(informe, datos, mascara):
         ), malos, precauciones)
 
     if informe.uso_pct is None:
-        faltan.append("desgaste (percentage_used)")
+        faltan.append("vida usada")
     elif informe.uso_pct >= reglas.UMBRAL_USO_FUENTE:
         _clasificar(_disparo(
             "NVME-USO-100",

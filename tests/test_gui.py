@@ -124,15 +124,27 @@ def test_cifras_clave_y_registro_del_fixture_real(gtk):
     assert vistas == {
         "temperatura": ("Temperatura", "46", "°C", "Normal", "Umbrales del disco: advertencia 83 °C · crítica 90 °C"),
         "vida": ("Vida usada", "1", "%", "Normal", "Estimación del propio disco. Queda 99 %."),
-        "reserva": ("Reserva disponible", "100", "%", "Normal", "Umbral del disco: 10 %"),
+        "reserva": ("Repuesto disponible", "100", "%", "Normal", "Umbral del disco: 10 %"),
         "horas": ("Horas encendido", "4,921", "h", "Informativo", "934 ciclos de encendido"),
         "escritos": ("Datos escritos", "13.08", "TB", "Informativo", "Leídos: 16.60 TB"),
-        "errores": ("Errores de medios", "0", "", "Normal", "Datos que el disco no pudo corregir"),
+        "errores": ("Errores de medio", "0", "", "Normal", "Datos que el disco no pudo corregir"),
     }
     assert all("numeric" in t.valor.get_css_classes() for t in pagina.cifras.values())
     assert pagina.grid_cifras.get_visible()
     assert len(pagina._filas_registro) == 18
     assert pagina.grupo_registro.get_visible()
+
+
+def test_la_autenticidad_va_despues_de_las_cifras(gtk):
+    """La salud va junta (tarjeta, «Por qué» y cifras); la autenticidad, aparte y después."""
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    hijos, hijo = [], pagina.contenido.get_first_child()
+    while hijo is not None:
+        hijos.append(hijo)
+        hijo = hijo.get_next_sibling()
+    orden = [hijos.index(w) for w in (pagina.grupo_motivos, pagina.grid_cifras, pagina.grupo_autenticidad,
+                                      pagina.expansor)]
+    assert orden == sorted(orden)
 
 
 def test_grupo_disco_con_fixture_real(gtk):

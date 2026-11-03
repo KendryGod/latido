@@ -84,6 +84,13 @@ def test_modo_demo_lleva_la_marca_arriba_y_abajo():
     assert lineas[-1] == MARCA_DEMO
 
 
+def test_secciones_en_el_orden_de_la_pantalla():
+    texto = construir_texto(analizar(cargar("nvme_real.json")), _disco(), fecha=FECHA)
+    secciones = [linea.split(":")[0] for linea in texto.splitlines() if linea[:1].isupper() and
+                 linea.split(":")[0].isupper()]
+    assert secciones == ["DISCO", "SALUD", "CIFRAS CLAVE", "AUTENTICIDAD", "TODOS LOS DATOS", "VELOCIDAD"]
+
+
 def test_nombre_por_defecto():
     assert nombre_por_defecto(FECHA) == "latido-informe-2026-11-03.txt"
 

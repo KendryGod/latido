@@ -131,6 +131,15 @@ def test_sin_umbrales_del_disco_la_temperatura_no_juzga(base_sintetica):
     assert analizar(base_sintetica).estado is Estado.BUENO
 
 
+def test_faltan_datos_en_espanol_claro(base_sintetica):
+    for clave in ("critical_warning", "media_errors", "available_spare", "percentage_used"):
+        _log(base_sintetica).pop(clave)
+    informe = analizar(base_sintetica)
+    assert informe.estado is Estado.DESCONOCIDO
+    assert [d.motivo for d in informe.disparos if d.regla == "FALTAN-DATOS"] == [
+        "Faltan datos: advertencia crítica, errores de medio, repuesto disponible y su umbral, vida usada."]
+
+
 def test_apagados_inseguros_solo_informan(base_sintetica):
     _log(base_sintetica)["unsafe_shutdowns"] = 10**6
     informe = analizar(base_sintetica)
