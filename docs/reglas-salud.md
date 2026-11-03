@@ -58,7 +58,19 @@ Se aplican solo si los bits 0 y 1 están apagados.
 - `media_errors` > 0.
 - `available_spare` en o por debajo de `available_spare_threshold`.
 - Vida estimada <= 10 %, donde vida = max(0, 100 - `percentage_used`).
+- `critical_comp_time` > 0: minutos que el disco pasó en o por encima de su
+  temperatura crítica (CCTEMP). Unidad verificada en NVM Express Base
+  Specification 2.0c, sección 5.16.1.3, figura 207. Si el disco no define
+  CCTEMP, la especificación dice que este campo siempre vale 0. Si el campo
+  falta, no cambia el estado (no está en la lista de datos obligatorios).
 - Bits 5, 6 o 7 del código de salida.
+
+### Solo se muestran (no cambian el estado)
+- `warning_temp_time`: minutos entre la temperatura de advertencia y la crítica.
+- `unsafe_shutdowns`: apagados inseguros.
+- `num_err_log_entries`: entradas del registro de errores (no todas son daños).
+- La temperatura actual: el estado por temperatura lo deciden el bit 1 de
+  `critical_warning` y `critical_comp_time`.
 
 ### DESCONOCIDO
 - Bits 0 o 1, JSON inválido o código de salida inválido.
@@ -82,8 +94,7 @@ Si un disco cumple a la vez reglas de varios estados, gana el más grave
   (`man smartctl`, opción `--json`, letra `v`).
 - **Temperatura**: solo se muestran los umbrales que reporta el propio disco
   (`nvme_composite_temperature_threshold`). Latido no inventa umbrales fijos y
-  la temperatura actual no cambia el estado: eso lo decide el bit 1 de
-  `critical_warning`, que activa el propio disco.
+  la temperatura actual no cambia el estado.
 
 ## 4. Lo que falta
 

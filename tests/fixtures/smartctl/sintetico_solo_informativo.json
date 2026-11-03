@@ -1,0 +1,67 @@
+{
+  "_sintetico": "INVENTADO para pruebas de Latido. No es la salida de un disco real.",
+  "json_format_version": [
+    1,
+    0
+  ],
+  "smartctl": {
+    "version": [
+      7,
+      5
+    ],
+    "argv": [
+      "smartctl",
+      "--json=c",
+      "-x",
+      "/dev/nvme0"
+    ],
+    "exit_status": 0
+  },
+  "device": {
+    "name": "/dev/nvme0",
+    "info_name": "/dev/nvme0",
+    "type": "nvme",
+    "protocol": "NVMe"
+  },
+  "model_name": "DISCO SINTETICO",
+  "firmware_version": "SINT0001",
+  "user_capacity": {
+    "blocks": 976773168,
+    "bytes": 500107862016
+  },
+  "nvme_composite_temperature_threshold": {
+    "warning": 80,
+    "critical": 85
+  },
+  "temperature": {
+    "op_limit_max": 80,
+    "critical_limit_max": 85,
+    "current": 84
+  },
+  "smart_status": {
+    "passed": true,
+    "nvme": {
+      "value": 0
+    }
+  },
+  "nvme_smart_health_information_log": {
+    "nsid": -1,
+    "critical_warning": 0,
+    "temperature": 84,
+    "available_spare": 100,
+    "available_spare_threshold": 10,
+    "percentage_used": 3,
+    "data_units_read": 1000000,
+    "data_units_written": 2000000,
+    "host_reads": 5000000,
+    "host_writes": 6000000,
+    "controller_busy_time": 100,
+    "power_cycles": 50,
+    "power_on_hours": 1200,
+    "unsafe_shutdowns": 999,
+    "media_errors": 0,
+    "num_err_log_entries": 57,
+    "warning_temp_time": 300,
+    "critical_comp_time": 0
+  }
+}

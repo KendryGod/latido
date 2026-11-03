@@ -1,8 +1,8 @@
 """Nombre y explicación en español de cada campo del registro de salud NVMe.
 
 Las claves son las que smartctl 7.5 usa en nvme_smart_health_information_log.
-Los significados y unidades siguen la especificación NVMe (SMART / Health
-Information Log).
+Significados y unidades verificados contra NVM Express Base Specification,
+revisión 2.0c, sección 5.16.1.3, figura 207 (SMART / Health Information Log).
 """
 
 from latido.salud import formato
@@ -129,12 +129,14 @@ CAMPOS = {
     ),
     "warning_temp_time": (
         "Tiempo sobre temperatura de advertencia",
-        "Minutos que el disco ha pasado por encima de su temperatura de advertencia.",
+        "Minutos que el disco ha pasado en o por encima de su temperatura de advertencia, "
+        "sin llegar a la crítica.",
         _minutos,
     ),
     "critical_comp_time": (
         "Tiempo sobre temperatura crítica",
-        "Minutos que el disco ha pasado por encima de su temperatura crítica.",
+        "Minutos que el disco ha pasado en o por encima de su temperatura crítica. "
+        "Si es mayor que 0, Latido lo marca como PRECAUCIÓN.",
         _minutos,
     ),
     "temperature_sensors": (

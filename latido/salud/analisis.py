@@ -217,6 +217,14 @@ def _diagnosticar_nvme(informe, datos, mascara):
     elif informe.vida_pct <= UMBRAL_VIDA_PCT:
         precauciones.append(f"Queda {informe.vida_pct} % de vida estimada (desgaste: {informe.uso_pct} %).")
 
+    # Unidad: minutos (NVMe Base Specification 2.0c, figura 207). No es un
+    # dato obligatorio para BUENO: si falta, no cambia el estado.
+    minutos_criticos = leer_entero(registro, "critical_comp_time")
+    if minutos_criticos is not None and minutos_criticos > 0:
+        precauciones.append(
+            f"El disco pasó {minutos_criticos:,} minutos en o por encima de su temperatura crítica."
+        )
+
     incompleto = bool(mascara & BIT_ORDEN_FALLIDA)
     aviso_faltan = "Faltan datos: " + ", ".join(faltan) + "."
 

@@ -273,3 +273,73 @@ def test_tb_con_variante_s(base_sintetica):
     informe = analizar(base_sintetica)
     assert informe.tb_escritos == 20000000000000000000 * 512000 / 10**12
     assert "data_units_written_s" not in [f.clave for f in informe.registro_nvme]
+
+
+# --- Fase 1: critical_comp_time y datos solo informativos -------------------
+
+@pytest.mark.parametrize("nombre, estado", [
+    ("sintetico_temp_critica.json", Estado.PRECAUCION),
+    ("sintetico_precaucion_combinada.json", Estado.PRECAUCION),
+    ("sintetico_malo_combinado.json", Estado.MALO),
+    ("sintetico_solo_informativo.json", Estado.BUENO),
+])
+def test_fixtures_sinteticos_fase_1(nombre, estado):
+    assert analizar(cargar(nombre)).estado is estado
+
+
+def test_critical_comp_time_mayor_que_cero_es_precaucion(base_sintetica):
+    _log(base_sintetica)["critical_comp_time"] = 1
+    informe = analizar(base_sintetica)
+    assert informe.estado is Estado.PRECAUCION
+    assert "El disco pasó 1 minutos en o por encima de su temperatura crítica." in informe.motivos
+
+
+def test_critical_comp_time_cero_no_cambia_nada(base_sintetica):
+    _log(base_sintetica)["critical_comp_time"] = 0
+    assert analizar(base_sintetica).estado is Estado.BUENO
+
+
+def test_critical_comp_time_ausente_no_cambia_nada(base_sintetica):
+    del _log(base_sintetica)["critical_comp_time"]
+    assert analizar(base_sintetica).estado is Estado.BUENO
+
+
+def test_critical_comp_time_con_variante_s(base_sintetica):
+    _log(base_sintetica)["critical_comp_time_s"] = "9007199254740993"
+    informe = analizar(base_sintetica)
+    assert informe.estado is Estado.PRECAUCION
+    assert any("9,007,199,254,740,993 minutos" in m for m in informe.motivos)
+
+
+@pytest.mark.parametrize("cambios", [
+    {"warning_temp_time": 5000},
+    {"unsafe_shutdowns": 10**6},
+    {"num_err_log_entries": 4321},
+    {"temperature": 120},
+])
+def test_datos_que_solo_se_muestran(base_sintetica, cambios):
+    _log(base_sintetica).update(cambios)
+    base_sintetica["temperature"]["current"] = _log(base_sintetica)["temperature"]
+    assert analizar(base_sintetica).estado is Estado.BUENO
+
+
+def test_precaucion_combinada_lista_todos_los_motivos():
+    motivos = analizar(cargar("sintetico_precaucion_combinada.json")).motivos
+    assert len(motivos) == 5
+    assert any("temperatura salió del rango" in m for m in motivos)
+    assert any("temperatura crítica" in m for m in motivos)
+
+
+def test_malo_combinado_conserva_las_precauciones():
+    informe = analizar(cargar("sintetico_malo_combinado.json"))
+    assert informe.estado is Estado.MALO
+    assert any("solo lectura" in m for m in informe.motivos)
+    assert any("12 minutos" in m for m in informe.motivos)
+    assert any("errores de medio" in m for m in informe.motivos)
+
+
+def test_explicacion_de_critical_comp_time_en_minutos(base_sintetica):
+    _log(base_sintetica)["critical_comp_time"] = 7
+    fila = next(f for f in analizar(base_sintetica).registro_nvme if f.clave == "critical_comp_time")
+    assert fila.texto == "7 min"
+    assert "Minutos" in fila.explicacion
