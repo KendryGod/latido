@@ -1,4 +1,4 @@
-"""Limpieza: tras éxito, error, cancelación o excepción no queda ningún archivo ni carpeta.
+"""Limpieza: tras éxito, error, cancelación o excepción no queda ningún archivo, carpeta ni descriptor abierto.
 
 Todo con el fio falso (tests/fio_falso.py) en tmp_path. La cancelación es
 real: el fio falso duerme con un proceso hijo y Latido detiene el grupo entero.
@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from conftest import FIXTURES_FIO, StatvfsFalso, vivo
+from conftest import FIXTURES_FIO, StatvfsFalso, descriptores_hacia, vivo
 from latido.velocidad.carpeta import revisar_carpeta
 from latido.velocidad.ejecucion import Cancelado, Ejecucion, ErrorVelocidad
 from latido.velocidad.herramientas import EstadoFio
@@ -45,6 +45,7 @@ def test_exito_no_deja_nada(carpeta, fio_falso):
     assert resultado.limpieza.completa and resultado.limpieza.archivo_borrado and resultado.limpieza.directorio_borrado
     assert resultado.limpieza.texto() == "Se borraron el archivo de prueba y su carpeta temporal."
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
     # 3 pasadas: el fio falso da 100, 200 y 300 MB/s.
     resumen = resultado.resumen(PRUEBAS[0], Direccion.LECTURA)
     assert (resumen.promedio, resumen.mejor, resumen.peor) == (200e6, 300e6, 100e6)
@@ -61,6 +62,7 @@ def test_error_de_fio_muestra_su_mensaje_y_limpia(carpeta, fio_falso):
     )
     assert error.value.limpieza.completa
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_error_en_la_preparacion_limpia(carpeta, fio_falso):
@@ -68,6 +70,7 @@ def test_error_en_la_preparacion_limpia(carpeta, fio_falso):
     with pytest.raises(ErrorVelocidad, match="Preparando el archivo de prueba"):
         _ejecucion(carpeta, fio_falso).ejecutar()
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 @pytest.mark.parametrize("modo, mensaje", [
@@ -80,6 +83,7 @@ def test_salida_mala_de_fio_limpia(carpeta, fio_falso, modo, mensaje):
     with pytest.raises(ErrorVelocidad, match=mensaje):
         _ejecucion(carpeta, fio_falso).ejecutar()
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def _cancelar_cuando_duerma(ejecucion, fio_falso):
@@ -114,6 +118,7 @@ def test_cancelar_durante_una_medicion_detiene_el_grupo_y_limpia(carpeta, fio_fa
     assert not vivo(principal) and not vivo(hijo)
     assert valor.limpieza.completa and valor.limpieza.archivo_borrado
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_cancelar_durante_la_preparacion_borra_lo_que_creo_fio(carpeta, fio_falso):
@@ -123,6 +128,7 @@ def test_cancelar_durante_la_preparacion_borra_lo_que_creo_fio(carpeta, fio_fals
     assert not vivo(principal) and not vivo(hijo)
     assert valor.limpieza.archivo_borrado
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_si_fio_ignora_sigterm_se_usa_sigkill(carpeta, fio_falso):
@@ -132,6 +138,7 @@ def test_si_fio_ignora_sigterm_se_usa_sigkill(carpeta, fio_falso):
     assert 1 <= segundos < 10  # esperó el plazo de SIGTERM y luego SIGKILL
     assert not vivo(principal) and not vivo(hijo)
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_medicion_que_no_termina_se_detiene(carpeta, fio_falso):
@@ -144,6 +151,7 @@ def test_medicion_que_no_termina_se_detiene(carpeta, fio_falso):
     assert not vivo(principal) and not any(vivo(h) for h in fio_falso.hijos())
     assert error.value.limpieza.completa
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_excepcion_inesperada_limpia(carpeta, fio_falso):
@@ -156,6 +164,7 @@ def test_excepcion_inesperada_limpia(carpeta, fio_falso):
     assert isinstance(error.value.__cause__, RuntimeError)
     assert error.value.limpieza.completa
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_interrupcion_del_teclado_tambien_limpia(carpeta, fio_falso):
@@ -166,6 +175,7 @@ def test_interrupcion_del_teclado_tambien_limpia(carpeta, fio_falso):
     with pytest.raises(KeyboardInterrupt):
         _ejecucion(carpeta, fio_falso, al_progresar=interrumpe).ejecutar()
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_cancelar_antes_de_empezar_no_crea_nada(carpeta, fio_falso):
@@ -176,6 +186,7 @@ def test_cancelar_antes_de_empezar_no_crea_nada(carpeta, fio_falso):
     assert cancelado.value.limpieza.texto() == "No se llegó a crear ningún archivo."
     assert fio_falso.invocaciones() == []
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_archivos_ajenos_no_se_borran_y_se_dice(carpeta, fio_falso):
@@ -188,6 +199,7 @@ def test_archivos_ajenos_no_se_borran_y_se_dice(carpeta, fio_falso):
     assert limpieza.problemas == [
         f"No se borró {carpeta / directorio}: quedaron archivos que Latido no creó (extra.txt). Revísalos tú."
     ]
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_reproduce_las_salidas_reales_de_fio(carpeta, fio_falso):
@@ -200,3 +212,4 @@ def test_reproduce_las_salidas_reales_de_fio(carpeta, fio_falso):
     assert round(resumen.iops_promedio, 6) == 1306.122449
     assert resultado.resumen(PRUEBAS[3], Direccion.ESCRITURA).promedio == 78766272
     assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []

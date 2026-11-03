@@ -5,13 +5,23 @@ primera línea) y lo pasan a Ejecucion(fio=...). Lee su configuración de un
 JSON al lado: <ruta>.json con
 
   modos:     lista de modos, uno por invocación (el último se repite)
-  registro:  archivo donde anota cada invocación (una línea JSON)
+  registro:  archivo donde anota cada invocación (una línea JSON, con adónde
+             apuntan los descriptores que heredó al arrancar)
   fixtures:  {nombre_de_trabajo: ruta de una salida real de fio}
   enlace:    destino del enlace simbólico del modo "enlaza"
+  destino:   ruta nueva de los modos "mueve" y "enlace_duro"
 
 Modos: ok, duerme, ignora_sigterm, falla, json_invalido, truncado,
-sin_trabajos, ensucia, reemplaza (cambia el archivo por otro con otro inodo)
-y enlaza (cambia el archivo por un enlace simbólico).
+sin_trabajos, ensucia, y estos, que cambian el archivo de prueba (después de
+crearlo, si hacía falta):
+  reemplaza    lo borra y crea otro con el mismo nombre y tamaño. Según el
+               sistema de archivos, el nuevo puede recibir el mismo número de
+               inodo que el borrado: tmpfs y btrfs no lo repiten, pero en la
+               CI (run 41575524354) se repitió.
+  enlaza       lo borra y pone en su lugar un enlace simbólico a "enlace"
+  borra        lo borra sin poner nada en su lugar
+  mueve        le cambia el nombre a "destino"
+  enlace_duro  le agrega un segundo nombre en "destino"
 """
 
 import json
@@ -66,6 +76,18 @@ def salida_ok(op, previas):
     }
 
 
+def descriptores_heredados():
+    """Adónde apunta cada descriptor abierto al arrancar, salvo 0, 1 y 2."""
+    destinos = []
+    for nombre in os.listdir("/proc/self/fd"):
+        if int(nombre) > 2:
+            try:
+                destinos.append(os.readlink(f"/proc/self/fd/{nombre}"))
+            except OSError:
+                pass  # el que usó listdir ya se cerró
+    return sorted(destinos)
+
+
 def preparar_archivo(op):
     """Imita lo que hace fio con el archivo: lo crea en una escritura si falta."""
     ruta = op["filename"]
@@ -80,6 +102,7 @@ def preparar_archivo(op):
 
 
 def main():
+    descriptores = descriptores_heredados()  # antes de abrir nada
     configuracion = json.loads(open(sys.argv[0] + ".json", encoding="utf-8").read())
     registro = configuracion["registro"]
     previas = invocaciones_previas(registro)
@@ -88,7 +111,7 @@ def main():
     op = opciones(sys.argv)
     anotar(
         registro, argv=sys.argv, nombre=op.get("name"), modo=modo, pid=os.getpid(), pgid=os.getpgrp(),
-        sid=os.getsid(0), cwd=os.getcwd(), entorno=dict(os.environ),
+        sid=os.getsid(0), cwd=os.getcwd(), entorno=dict(os.environ), descriptores=descriptores,
     )
 
     if modo in ("duerme", "ignora_sigterm"):
@@ -114,6 +137,12 @@ def main():
     elif modo == "enlaza":
         os.unlink(op["filename"])
         os.symlink(configuracion["enlace"], op["filename"])
+    elif modo == "borra":
+        os.unlink(op["filename"])
+    elif modo == "mueve":
+        os.rename(op["filename"], configuracion["destino"])
+    elif modo == "enlace_duro":
+        os.link(op["filename"], configuracion["destino"])
     fixture = (configuracion.get("fixtures") or {}).get(op.get("name"))
     if fixture:
         texto = open(fixture, encoding="utf-8").read()

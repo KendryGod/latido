@@ -3,12 +3,23 @@
 Regla de oro de esta pestaña:
 - fio escribe solo <carpeta>/.latido-velocidad-XXXXXXXX/latido-velocidad.dat,
   dentro de un directorio NUEVO creado con tempfile.mkdtemp (modo 0700).
-- Antes de cada paso se comprueba que el directorio y el archivo siguen siendo
-  los que creó Latido (mismo dispositivo e inodo, sin enlaces simbólicos). El
-  archivo no existe antes de la preparación: fio lo crea.
+- El archivo no existe antes de la preparación: lo crea fio. Latido mantiene
+  abiertos el directorio desde que lo crea y el archivo desde que termina la
+  preparación. Mientras los tenga abiertos siguen existiendo aunque alguien los
+  borre (man 2 unlink), y ningún otro archivo de ese sistema de archivos puede
+  tener su número de inodo (man 7 inode). Antes y después de cada paso se
+  compara lo que Latido tiene abierto (os.fstat) con lo que hay en la ruta, sin
+  seguir enlaces simbólicos: mismo dispositivo e inodo, un solo nombre
+  (st_nlink == 1) y el tamaño pedido. Así se detecta un reemplazo aunque el
+  sistema de archivos le dé al archivo nuevo el número del borrado (en la CI,
+  run 41575524354, pasó).
 - Al terminar, fallar, cancelar o por una excepción: se detiene el grupo de
-  procesos de fio, se borra solo el archivo de prueba por su nombre exacto y
-  luego el directorio con rmdir. Nunca rm -r ni shutil.rmtree.
+  procesos de fio; se borra el archivo de prueba por su nombre exacto solo si
+  sigue siendo el que Latido tiene abierto y tiene un solo nombre (si la
+  preparación no llegó a terminar, el archivo normal con un solo nombre que
+  haya en su ruta, que solo puede ser el que fio estaba creando); luego el
+  directorio con rmdir, y se cierran todos los descriptores. Nunca rm -r ni
+  shutil.rmtree.
 - Una sola prueba a la vez. fio corre como el usuario, con lista de
   argumentos, ruta absoluta y entorno limpio; nunca a través de un shell.
 """
@@ -35,6 +46,12 @@ ENTORNO = {"LC_ALL": "C"}
 SEGUNDOS_MAXIMOS_MEDICION = 120
 SEGUNDOS_PARA_TERMINAR = 10  # tras SIGTERM, antes de SIGKILL
 INTERVALO = 0.1
+# Para vigilar el archivo de prueba: un descriptor normal de solo lectura, no
+# O_PATH (man 2 open: con O_PATH "the file itself is not opened"; man 2 unlink
+# habla de procesos que tienen el archivo abierto). O_NONBLOCK: no se queda
+# esperando si en la ruta hay una FIFO. O_NOFOLLOW: falla ante un enlace simbólico.
+ABRIR_PARA_VIGILAR = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
+CAMBIO = "El archivo de prueba cambió o desapareció durante la prueba"
 
 _una_a_la_vez = threading.Lock()
 
@@ -47,6 +64,7 @@ class _Cancelacion(Exception):
 class Limpieza:
     creo_directorio: bool = False
     archivo_borrado: bool = False
+    archivo_borrado_por_otro: bool = False  # Latido lo tenía abierto y ya no le quedaba ningún nombre
     directorio_borrado: bool = False
     problemas: list = field(default_factory=list)
 
@@ -61,7 +79,49 @@ class Limpieza:
             return "No se llegó a crear ningún archivo."
         if self.archivo_borrado:
             return "Se borraron el archivo de prueba y su carpeta temporal."
+        if self.archivo_borrado_por_otro:
+            return "Se borró la carpeta temporal; el archivo de prueba ya lo había borrado otro programa."
         return "Se borró la carpeta temporal; el archivo de prueba no llegó a crearse."
+
+
+def _que_hay(info):
+    if stat.S_ISLNK(info.st_mode):
+        return "un enlace simbólico"
+    if stat.S_ISDIR(info.st_mode):
+        return "una carpeta"
+    if stat.S_ISREG(info.st_mode):
+        return "otro archivo"
+    return "algo que no es un archivo normal"
+
+
+def _varios_nombres(cantidad):
+    return f"tiene {cantidad} nombres: alguien le hizo un enlace duro"
+
+
+def motivo_de_cambio(propio, en_ruta, tamano):
+    """Por qué el archivo de prueba ya no es el que creó fio, o None si lo sigue siendo.
+
+    propio: os.fstat del descriptor que Latido mantiene abierto.
+    en_ruta: os.stat del nombre en el directorio temporal, sin seguir enlaces
+    simbólicos, o None si ahí no hay nada.
+    Se exige un solo nombre: 0 significa que lo borraron; más de 1, que alguien
+    le hizo un enlace duro. Ante la duda, Latido se detiene.
+    """
+    if propio.st_nlink == 0:
+        if en_ruta is None:
+            return "lo borró otro programa"
+        return f"lo borró otro programa y en su lugar hay {_que_hay(en_ruta)}"
+    if propio.st_nlink != 1:
+        return _varios_nombres(propio.st_nlink)
+    if en_ruta is None:
+        return "otro programa lo movió o le cambió el nombre"
+    if (en_ruta.st_dev, en_ruta.st_ino) != (propio.st_dev, propio.st_ino):
+        return f"otro programa lo movió y en su lugar hay {_que_hay(en_ruta)}"
+    if en_ruta.st_nlink != 1:
+        return _varios_nombres(en_ruta.st_nlink)
+    if propio.st_size != tamano:
+        return f"ahora mide {propio.st_size:,} bytes en vez de {tamano:,}"
+    return None
 
 
 class ErrorVelocidad(Exception):
@@ -128,9 +188,10 @@ class Ejecucion:
         self._proceso = None
         self._fd_padre = None
         self._fd_directorio = None
+        self._fd_archivo = None  # abierto desde que termina la preparación hasta la limpieza
         self._identidad_directorio = None
-        self._identidad_archivo = None
         self._fio_pudo_crear_archivo = False
+        self._archivo_sigue = False  # la limpieza dejó sin borrar el archivo de prueba de Latido
         self.directorio = None
         self.archivo = None
 
@@ -217,7 +278,7 @@ class Ejecucion:
         for indice, paso in enumerate(pasos):
             if self._cancelar.is_set():
                 raise _Cancelacion()
-            self._verificar_antes(paso)
+            self._verificar(paso)  # antes: fio abrirá el archivo por su ruta
             self._al_progresar(Progreso(indice, total, paso))
             comando = construir_comando(paso, self.archivo, self.configuracion.tamano, self._fio)
             limite = None if paso.es_preparacion else self._segundos_maximos_medicion
@@ -231,48 +292,70 @@ class Ejecucion:
                 descripcion = paso.descripcion(self.configuracion.pasadas)
                 raise ErrorVelocidad(f"fio falló en «{descripcion}».\n{fallo.mensaje}") from None
             if paso.es_preparacion:
+                self._verificar_carpeta()
                 self._registrar_archivo()
                 medicion = None
             else:
+                self._verificar(paso)  # después: la medición se hizo sobre el archivo de Latido
                 resultado.agregar(paso, medicion)
             self._al_progresar(Progreso(indice, total, paso, terminado=True, medicion=medicion))
 
-    def _verificar_antes(self, paso):
+    def _verificar(self, paso):
+        """Antes y después de cada paso: la carpeta temporal y el archivo siguen siendo los de Latido."""
+        self._verificar_carpeta()
+        if paso.es_preparacion:
+            if self._en_la_ruta() is not None:
+                raise ErrorVelocidad(
+                    "Ya había algo en la ruta del archivo de prueba antes de crearlo; Latido no lo usa y se detuvo."
+                )
+            return
+        motivo = motivo_de_cambio(os.fstat(self._fd_archivo), self._en_la_ruta(), self.configuracion.tamano)
+        if motivo:
+            raise ErrorVelocidad(f"{CAMBIO}: {motivo}. Latido se detuvo por seguridad.")
+
+    def _verificar_carpeta(self):
+        # Está abierta desde que se creó (_fd_directorio): su número no puede pasar a otra carpeta.
         try:
             info = os.lstat(self.directorio)
         except OSError:
             info = None
         if info is None or not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != self._identidad_directorio:
             raise ErrorVelocidad("La carpeta temporal de la prueba cambió o desapareció; Latido se detuvo por seguridad.")
+
+    def _en_la_ruta(self):
+        """os.stat del nombre del archivo de prueba en el directorio temporal, sin seguir enlaces; None si no hay nada."""
         try:
-            info = os.stat(ARCHIVO_PRUEBA, dir_fd=self._fd_directorio, follow_symlinks=False)
+            return os.stat(ARCHIVO_PRUEBA, dir_fd=self._fd_directorio, follow_symlinks=False)
         except FileNotFoundError:
-            info = None
-        if paso.es_preparacion:
-            if info is not None:
-                raise ErrorVelocidad(
-                    "Ya había algo en la ruta del archivo de prueba antes de crearlo; Latido no lo usa y se detuvo."
-                )
-        elif (
-            info is None
-            or not stat.S_ISREG(info.st_mode)
-            or (info.st_dev, info.st_ino) != self._identidad_archivo
-            or info.st_size != self.configuracion.tamano
-        ):
-            raise ErrorVelocidad("El archivo de prueba cambió o desapareció entre dos pasos; Latido se detuvo por seguridad.")
+            return None
 
     def _registrar_archivo(self):
-        try:
-            info = os.stat(ARCHIVO_PRUEBA, dir_fd=self._fd_directorio, follow_symlinks=False)
-        except FileNotFoundError:
-            raise ErrorVelocidad("fio terminó la preparación sin crear el archivo de prueba.") from None
+        """Al terminar la preparación: abre el archivo que creó fio y lo mantiene abierto hasta la limpieza."""
+        info = self._en_la_ruta()
+        if info is None:
+            raise ErrorVelocidad("fio terminó la preparación sin crear el archivo de prueba.")
         if not stat.S_ISREG(info.st_mode):
             raise ErrorVelocidad("Lo que quedó en la ruta del archivo de prueba no es un archivo normal.")
         if info.st_size != self.configuracion.tamano:
             raise ErrorVelocidad(
                 f"El archivo de prueba quedó con {info.st_size:,} bytes en vez de {self.configuracion.tamano:,}."
             )
-        self._identidad_archivo = (info.st_dev, info.st_ino)
+        try:
+            descriptor = os.open(ARCHIVO_PRUEBA, ABRIR_PARA_VIGILAR, dir_fd=self._fd_directorio)
+        except OSError as error:
+            raise ErrorVelocidad(f"No se pudo abrir el archivo de prueba para vigilarlo: {error.strerror}.") from None
+        try:
+            propio = os.fstat(descriptor)
+            if (propio.st_dev, propio.st_ino) != (info.st_dev, info.st_ino):
+                motivo = "otro programa lo cambió justo al terminar la preparación"
+            else:
+                motivo = motivo_de_cambio(propio, self._en_la_ruta(), self.configuracion.tamano)
+            if motivo:
+                raise ErrorVelocidad(f"{CAMBIO}: {motivo}. Latido se detuvo por seguridad.")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self._fd_archivo = descriptor
 
     def _correr(self, comando, limite_segundos):
         try:
@@ -325,39 +408,71 @@ class Ejecucion:
 
     def _limpiar(self):
         limpieza = Limpieza(creo_directorio=self.directorio is not None)
-        proceso, self._proceso = self._proceso, None
-        if proceso is not None and proceso.returncode is None:
-            limpieza.problemas += self._detener(proceso)
-        if self.directorio is not None:
-            self._borrar_archivo(limpieza)
-            self._borrar_directorio(limpieza)
-        for descriptor in (self._fd_directorio, self._fd_padre):
-            if descriptor is not None:
-                os.close(descriptor)
-        self._fd_directorio = self._fd_padre = None
+        try:
+            proceso, self._proceso = self._proceso, None
+            if proceso is not None and proceso.returncode is None:
+                limpieza.problemas += self._detener(proceso)
+            if self.directorio is not None:
+                self._borrar_archivo(limpieza)
+                self._borrar_directorio(limpieza)
+        finally:
+            self._cerrar_descriptores()
         return limpieza
+
+    def _cerrar_descriptores(self):
+        """Siempre, pase lo que pase en la limpieza: archivo, directorio temporal y carpeta elegida."""
+        descriptores = (self._fd_archivo, self._fd_directorio, self._fd_padre)
+        self._fd_archivo = self._fd_directorio = self._fd_padre = None
+        for descriptor in descriptores:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass  # no queda nada que hacer con ese; se cierran los demás
 
     def _borrar_archivo(self, limpieza):
         if self._fd_directorio is None:
             return  # fio nunca corrió: no puede haber archivo
         try:
-            info = os.stat(ARCHIVO_PRUEBA, dir_fd=self._fd_directorio, follow_symlinks=False)
-        except FileNotFoundError:
-            return
+            en_ruta = self._en_la_ruta()
+            propio = None if self._fd_archivo is None else os.fstat(self._fd_archivo)
         except OSError as error:
             limpieza.problemas.append(f"No se pudo revisar {self.archivo}: {error.strerror}.")
             return
-        if self._identidad_archivo is not None:
-            conocido = (info.st_dev, info.st_ino) == self._identidad_archivo
-        else:
-            conocido = self._fio_pudo_crear_archivo  # se canceló o falló durante la preparación
-        if not stat.S_ISREG(info.st_mode) or not conocido:
-            limpieza.problemas.append(f"En {self.archivo} hay algo que no es el archivo de prueba de Latido; no se borró.")
+        ajeno = f"En {self.archivo} hay algo que no es el archivo de prueba de Latido; no se borró."
+        if propio is not None:
+            mismo = (
+                en_ruta is not None
+                and propio.st_nlink != 0
+                and (en_ruta.st_dev, en_ruta.st_ino) == (propio.st_dev, propio.st_ino)
+            )
+            if not mismo:
+                if en_ruta is not None:
+                    limpieza.problemas.append(ajeno)
+                if propio.st_nlink == 0:
+                    limpieza.archivo_borrado_por_otro = True
+                else:
+                    limpieza.problemas.append(
+                        "El archivo de prueba de Latido se movió o cambió de nombre (no fue Latido); no se borró."
+                    )
+                return
+        elif en_ruta is None:
+            return
+        elif not stat.S_ISREG(en_ruta.st_mode) or not self._fio_pudo_crear_archivo:
+            # Sin descriptor, la preparación no terminó: un archivo normal solo puede ser el que fio estaba creando.
+            limpieza.problemas.append(ajeno)
+            return
+        if en_ruta.st_nlink != 1:
+            self._archivo_sigue = True
+            limpieza.problemas.append(
+                f"{self.archivo} tiene {en_ruta.st_nlink} nombres (alguien le hizo un enlace duro); Latido no lo borró."
+            )
             return
         try:
             os.unlink(ARCHIVO_PRUEBA, dir_fd=self._fd_directorio)
             limpieza.archivo_borrado = True
         except OSError as error:
+            self._archivo_sigue = True
             limpieza.problemas.append(f"No se pudo borrar {self.archivo}: {error.strerror}.")
 
     def _borrar_directorio(self, limpieza):
@@ -379,9 +494,29 @@ class Ejecucion:
             limpieza.directorio_borrado = True
         except OSError as error:
             if error.errno in (errno.ENOTEMPTY, errno.EEXIST) and self._fd_directorio is not None:
-                quedan = ", ".join(sorted(os.listdir(self._fd_directorio)))
-                limpieza.problemas.append(
-                    f"No se borró {self.directorio}: quedaron archivos que Latido no creó ({quedan}). Revísalos tú."
-                )
+                quedan = sorted(os.listdir(self._fd_directorio))
+                propios = [nombre for nombre in quedan if self._es_el_archivo_de_latido(nombre)]
+                ajenos = [nombre for nombre in quedan if nombre not in propios]
+                if ajenos:
+                    limpieza.problemas.append(
+                        f"No se borró {self.directorio}: quedaron archivos que Latido no creó ({', '.join(ajenos)}). "
+                        "Revísalos tú."
+                    )
+                if propios:
+                    limpieza.problemas.append(
+                        f"No se borró {self.directorio}: dentro sigue el archivo de prueba de Latido "
+                        f"({', '.join(propios)})."
+                    )
             else:
                 limpieza.problemas.append(f"No se pudo borrar {self.directorio}: {error.strerror}.")
+
+    def _es_el_archivo_de_latido(self, nombre):
+        """Si ese nombre del directorio temporal es el archivo de prueba de Latido, que quedó sin borrar."""
+        if self._fd_archivo is None:
+            return nombre == ARCHIVO_PRUEBA and self._archivo_sigue
+        try:
+            info = os.stat(nombre, dir_fd=self._fd_directorio, follow_symlinks=False)
+            propio = os.fstat(self._fd_archivo)
+        except OSError:
+            return False
+        return (info.st_dev, info.st_ino) == (propio.st_dev, propio.st_ino)

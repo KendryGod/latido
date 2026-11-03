@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from conftest import StatvfsFalso, esperar, vivo
+from conftest import StatvfsFalso, descriptores_hacia, esperar, vivo
 from latido.velocidad.carpeta import InfoCarpeta, Revision, revisar_carpeta
 from latido.velocidad.ejecucion import Ejecucion
 from latido.velocidad.herramientas import EstadoFio
@@ -168,6 +168,7 @@ def test_prueba_completa_con_fio_falso(gtk, carpeta, fio_falso):
     assert pagina.mensaje.get_text() == "Prueba terminada. Se borraron el archivo de prueba y su carpeta temporal."
     assert pagina.boton.get_label() == "Iniciar" and pagina.boton.get_sensitive()
     assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
 
 
 def _esperar_que_duerma(GLib, fio_falso):
@@ -189,6 +190,7 @@ def test_cancelar_desde_la_interfaz_detiene_fio_y_limpia(gtk, carpeta, fio_falso
     assert pagina.cuadros["seq1m-q8t1"].columnas[Direccion.LECTURA].estado.get_text() == "Sin resultado"
     assert not vivo(principal) and not vivo(hijo)
     assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_error_de_fio_se_muestra_tal_cual(gtk, carpeta, fio_falso):
@@ -205,6 +207,7 @@ def test_error_de_fio_se_muestra_tal_cual(gtk, carpeta, fio_falso):
         "Se borró la carpeta temporal; el archivo de prueba no llegó a crearse."  # el falso falla antes de crearlo
     )
     assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_cerrar_la_ventana_en_plena_prueba_pide_confirmacion_y_limpia(gtk, carpeta, fio_falso):
@@ -232,6 +235,7 @@ def test_cerrar_la_ventana_en_plena_prueba_pide_confirmacion_y_limpia(gtk, carpe
     assert not pagina.en_marcha
     assert not vivo(principal) and not vivo(hijo)
     assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_cerrar_sin_prueba_no_pregunta(gtk):
@@ -267,6 +271,7 @@ def test_restos_de_la_ultima_carpeta_se_avisan_y_solo_se_borran_al_confirmar(gtk
     pagina.responder_restos(pagina.dialogo_restos, "borrar")
     assert not resto.exists()
     assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
     assert pagina.mensaje.get_text() == f"Se borró {resto}."
     assert not pagina.banner.get_revealed()
 
@@ -304,6 +309,7 @@ def test_al_salir_de_la_app_se_detiene_fio_y_se_espera_la_limpieza(gtk, carpeta,
     assert not pagina._hilo.is_alive()
     assert not vivo(principal) and not vivo(hijo)
     assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
 
 
 def test_la_aplicacion_detiene_cada_ventana_al_salir(gtk, monkeypatch):

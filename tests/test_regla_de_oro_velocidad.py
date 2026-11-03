@@ -7,6 +7,7 @@ real: se usa tests/fio_falso.py (y conftest.py hace fallar cualquier intento).
 """
 
 import os
+import stat
 import subprocess
 import tempfile
 import threading
@@ -14,10 +15,10 @@ import time
 
 import pytest
 
-from conftest import StatvfsFalso, es_programa_prohibido
+from conftest import StatvfsFalso, descriptores_hacia, es_programa_prohibido
 from latido.velocidad import ejecucion as ejecucion_mod
 from latido.velocidad.carpeta import ErrorCarpeta, revisar_carpeta, validar_carpeta
-from latido.velocidad.ejecucion import ENTORNO, Cancelado, Ejecucion, ErrorVelocidad
+from latido.velocidad.ejecucion import ENTORNO, Cancelado, Ejecucion, ErrorVelocidad, motivo_de_cambio
 from latido.velocidad.herramientas import EstadoFio
 from latido.velocidad.pruebas import (
     ARCHIVO_PRUEBA,
@@ -231,6 +232,17 @@ def test_nunca_shell_lista_ruta_absoluta_entorno_limpio_y_grupo_propio(tmp_path,
         assert {k: v for k, v in invocacion["entorno"].items() if k != "LC_CTYPE"} == {"LC_ALL": "C"}
 
 
+def test_fio_no_hereda_los_descriptores_de_latido(tmp_path, fio_falso):
+    """Latido mantiene abiertos la carpeta elegida, el directorio temporal y el archivo de prueba; fio no los recibe."""
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    _ejecucion(carpeta, fio_falso).ejecutar()
+    invocaciones = fio_falso.invocaciones()
+    assert len(invocaciones) == 9
+    for invocacion in invocaciones:
+        assert [d for d in invocacion["descriptores"] if d.startswith(str(carpeta))] == []
+
+
 def test_nunca_usa_un_archivo_que_ya_existia(tmp_path, fio_falso, monkeypatch):
     """Si algo aparece en la ruta antes de crear el archivo, Latido no lo usa ni lo borra."""
     mkdtemp_real = tempfile.mkdtemp
@@ -294,6 +306,120 @@ def test_enlace_simbolico_puesto_entre_pasos_no_se_sigue(tmp_path, fio_falso):
         _ejecucion(carpeta, fio_falso).ejecutar()
     assert len(fio_falso.invocaciones()) == 2
     assert fuera.read_text(encoding="utf-8") == "no tocar"
+
+
+def test_reemplazo_detectado_aunque_el_sistema_repita_el_numero_de_inodo(tmp_path, fio_falso, reutilizar_inodos):
+    """Lo que pasó en la CI (run 41575524354): el archivo nuevo puede recibir el número del borrado.
+
+    El simulador le da al archivo nuevo el número del borrado si este ya no existe.
+    Latido mantiene abierto el original, así que su número no se puede repetir
+    (man 2 unlink, man 7 inode) y el reemplazo se detecta en cualquier sistema de
+    archivos. Si Latido no lo mantuviera abierto, esta prueba fallaría en todas
+    partes, como falló la CI.
+    """
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    fio_falso.configurar(["ok", "reemplaza", "ok"])
+    ej = _ejecucion(carpeta, fio_falso)
+    with pytest.raises(ErrorVelocidad, match="lo borró otro programa y en su lugar hay otro archivo") as error:
+        ej.ejecutar()
+    assert len(fio_falso.invocaciones()) == 2
+    assert reutilizar_inodos.decisiones == [(ARCHIVO_PRUEBA, "anterior abierto")]
+    assert any("no es el archivo de prueba de Latido" in p for p in error.value.limpieza.problemas)
+    assert os.path.isfile(ej.archivo)  # el archivo ajeno no se borró
+    assert descriptores_hacia(carpeta) == []
+
+
+def test_un_cambio_durante_la_ultima_medicion_tambien_detiene_la_prueba(tmp_path, fio_falso):
+    """Se verifica antes y después de cada paso: no se acepta un resultado medido sobre otro archivo."""
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    fio_falso.configurar(["ok"] * 8 + ["reemplaza"])
+    with pytest.raises(ErrorVelocidad, match="cambió o desapareció") as error:
+        _ejecucion(carpeta, fio_falso).ejecutar()
+    assert len(fio_falso.invocaciones()) == 9
+    assert any("no es el archivo de prueba de Latido" in p for p in error.value.limpieza.problemas)
+
+
+def test_archivo_borrado_entre_pasos_detiene_la_prueba_y_se_dice(tmp_path, fio_falso):
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    fio_falso.configurar(["ok", "borra", "ok"])
+    with pytest.raises(ErrorVelocidad) as error:
+        _ejecucion(carpeta, fio_falso).ejecutar()
+    assert error.value.mensaje == (
+        "El archivo de prueba cambió o desapareció durante la prueba: lo borró otro programa. "
+        "Latido se detuvo por seguridad."
+    )
+    assert len(fio_falso.invocaciones()) == 2
+    assert error.value.limpieza.texto() == (
+        "Se borró la carpeta temporal; el archivo de prueba ya lo había borrado otro programa."
+    )
+    assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
+
+
+def test_archivo_movido_entre_pasos_detiene_la_prueba_y_no_se_borra(tmp_path, fio_falso):
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    movido = tmp_path / "movido.dat"
+    fio_falso.configurar(["ok", "mueve", "ok"], destino=str(movido))
+    with pytest.raises(ErrorVelocidad, match="otro programa lo movió o le cambió el nombre") as error:
+        _ejecucion(carpeta, fio_falso).ejecutar()
+    assert len(fio_falso.invocaciones()) == 2
+    assert movido.stat().st_size == 256 * MIB  # sigue donde lo dejaron
+    assert error.value.limpieza.problemas == [
+        "El archivo de prueba de Latido se movió o cambió de nombre (no fue Latido); no se borró."
+    ]
+    assert os.listdir(carpeta) == []
+    assert descriptores_hacia(carpeta) == []
+
+
+@pytest.mark.parametrize("modos", [["ok", "enlace_duro", "ok"], ["enlace_duro", "ok"]],
+                         ids=["en-una-medicion", "en-la-preparacion"])
+def test_archivo_con_un_segundo_nombre_detiene_la_prueba_y_no_se_borra(tmp_path, fio_falso, modos):
+    """st_nlink debe ser exactamente 1: con un enlace duro extra, Latido se detiene, lo dice y no borra nada."""
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    segundo = tmp_path / "segundo-nombre.dat"
+    fio_falso.configurar(modos, destino=str(segundo))
+    ej = _ejecucion(carpeta, fio_falso)
+    with pytest.raises(ErrorVelocidad, match="tiene 2 nombres: alguien le hizo un enlace duro") as error:
+        ej.ejecutar()
+    assert len(fio_falso.invocaciones()) == len(modos) - 1
+    assert os.path.samefile(segundo, ej.archivo)  # no se borró ninguno de los dos nombres
+    assert error.value.limpieza.problemas == [
+        f"{ej.archivo} tiene 2 nombres (alguien le hizo un enlace duro); Latido no lo borró.",
+        f"No se borró {ej.directorio}: dentro sigue el archivo de prueba de Latido ({ARCHIVO_PRUEBA}).",
+    ]
+    assert descriptores_hacia(carpeta) == []
+
+
+def _estado(ino=42, dev=7, nombres=1, tamano=TAMANO, tipo=stat.S_IFREG):
+    """Un os.stat_result fabricado: modo, inodo, dispositivo, enlaces, uid, gid, tamaño y tres tiempos."""
+    return os.stat_result((tipo | 0o600, ino, dev, nombres, 0, 0, tamano, 0, 0, 0))
+
+
+@pytest.mark.parametrize("propio, en_ruta, motivo", [
+    (_estado(), _estado(), None),
+    (_estado(nombres=0), None, "lo borró otro programa"),
+    # Lo que Latido habría visto en la CI si hubiera tenido el original abierto pero el
+    # número se repitiera: mismo dispositivo e inodo, y aun así el suyo ya no tiene nombre.
+    (_estado(nombres=0), _estado(), "lo borró otro programa y en su lugar hay otro archivo"),
+    (_estado(nombres=0), _estado(ino=43, tipo=stat.S_IFLNK), "lo borró otro programa y en su lugar hay un enlace simbólico"),
+    (_estado(nombres=2), _estado(nombres=2), "tiene 2 nombres: alguien le hizo un enlace duro"),
+    (_estado(), None, "otro programa lo movió o le cambió el nombre"),
+    (_estado(), _estado(ino=43), "otro programa lo movió y en su lugar hay otro archivo"),
+    (_estado(), _estado(dev=8), "otro programa lo movió y en su lugar hay otro archivo"),
+    (_estado(), _estado(ino=43, tipo=stat.S_IFDIR), "otro programa lo movió y en su lugar hay una carpeta"),
+    (_estado(), _estado(ino=43, tipo=stat.S_IFIFO),
+     "otro programa lo movió y en su lugar hay algo que no es un archivo normal"),
+    (_estado(), _estado(nombres=3), "tiene 3 nombres: alguien le hizo un enlace duro"),
+    (_estado(tamano=5), _estado(tamano=5), f"ahora mide 5 bytes en vez de {TAMANO:,}"),
+], ids=["el-mismo", "borrado", "borrado-con-el-mismo-numero", "borrado-y-enlace", "dos-nombres", "movido",
+        "otro-inodo", "otro-dispositivo", "una-carpeta", "una-fifo", "tres-nombres-en-la-ruta", "otro-tamano"])
+def test_motivo_de_cambio(propio, en_ruta, motivo):
+    assert motivo_de_cambio(propio, en_ruta, TAMANO) == motivo
 
 
 # --- herramientas y carpeta ANTES de crear nada ---

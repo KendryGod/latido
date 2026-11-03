@@ -1,12 +1,15 @@
 import copy
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
+
+from latido.velocidad.pruebas import ARCHIVO_PRUEBA
 
 FIXTURES = Path(__file__).parent / "fixtures" / "smartctl"
 FIXTURES_FIO = Path(__file__).parent / "fixtures" / "fio"
@@ -119,12 +122,13 @@ class FioFalso:
         self.ruta.chmod(0o755)
         self.configurar(["ok"])
 
-    def configurar(self, modos, fixtures=None, enlace=None):
+    def configurar(self, modos, fixtures=None, enlace=None, destino=None):
         datos = {
             "modos": modos,
             "registro": str(self.registro),
             "fixtures": {nombre: str(ruta) for nombre, ruta in (fixtures or {}).items()},
             "enlace": enlace,
+            "destino": destino,
         }
         Path(str(self.ruta) + ".json").write_text(json.dumps(datos), encoding="utf-8")
 
@@ -160,3 +164,141 @@ def vivo(pid):
     except FileNotFoundError:
         return False
     return estado != "Z"
+
+
+def descriptores_hacia(ruta):
+    """Descriptores abiertos de este proceso que apuntan a ruta o a algo dentro (aunque esté borrado)."""
+    ruta = str(ruta)
+    hallados = []
+    for nombre in os.listdir("/proc/self/fd"):
+        try:
+            destino = os.readlink(f"/proc/self/fd/{nombre}")
+        except OSError:
+            continue  # el que usó listdir ya se cerró
+        if destino == ruta or destino.startswith(ruta + "/"):
+            hallados.append((int(nombre), destino))
+    return hallados
+
+
+# --- Simulador de reutilización de números de inodo ---
+
+STAT_REAL, LSTAT_REAL, FSTAT_REAL = os.stat, os.lstat, os.fstat
+
+
+class SimuladorInodos:
+    """Imita un sistema de archivos que da a un archivo nuevo el número de inodo
+    de uno que ya no existe. Así falló la CI (run 41575524354); tmpfs y btrfs no
+    repiten números, por eso en esta máquina la prueba pasaba.
+
+    Solo cambia lo que ven os.stat, os.lstat y os.fstat de ESTE proceso, y solo
+    para archivos normales con los nombres indicados. Regla, según man 2 unlink
+    y man 7 inode: cuando aparece un archivo nuevo con el mismo nombre en la
+    misma carpeta, recibe el número del anterior solo si el anterior ya no
+    existe: sin nombre en esa carpeta y sin ningún descriptor de este proceso
+    abierto hacia él. No mira descriptores de otros procesos ni nombres en otras
+    carpetas.
+
+    decisiones: una (nombre, motivo) cada vez que aparece un archivo nuevo donde
+    había otro; motivo es "reutilizado", "anterior abierto" o "anterior con nombre".
+    """
+
+    def __init__(self, nombres):
+        self.nombres = set(nombres)
+        self.decisiones = []
+        self._ultimo = {}  # (dev_carpeta, ino_carpeta, nombre) -> (dev, ino_real, ino_informado)
+        self._traduccion = {}  # (dev, ino_real) -> ino_informado
+
+    def stat(self, ruta, *, dir_fd=None, follow_symlinks=True):
+        return self._observar(STAT_REAL(ruta, dir_fd=dir_fd, follow_symlinks=follow_symlinks), ruta, dir_fd)
+
+    def lstat(self, ruta, *, dir_fd=None):
+        return self._observar(LSTAT_REAL(ruta, dir_fd=dir_fd), ruta, dir_fd)
+
+    def fstat(self, descriptor):
+        return self._traducir(FSTAT_REAL(descriptor))
+
+    @staticmethod
+    def _con_numero(info, ino):
+        _clase, (visibles, ocultos) = info.__reduce__()
+        visibles = list(visibles)
+        visibles[1] = ino  # st_ino
+        return os.stat_result(visibles, ocultos)
+
+    def _traducir(self, info):
+        ino = self._traduccion.get((info.st_dev, info.st_ino))
+        return info if ino is None else self._con_numero(info, ino)
+
+    def _observar(self, info, ruta, dir_fd):
+        if isinstance(ruta, int) or not stat.S_ISREG(info.st_mode):
+            return self._traducir(info)
+        texto = os.fsdecode(ruta)
+        relativa = dir_fd is not None and not os.path.isabs(texto)
+        nombre = os.path.basename(texto)
+        if nombre not in self.nombres or (relativa and "/" in texto):
+            return self._traducir(info)
+        if relativa:
+            carpeta, datos = dir_fd, FSTAT_REAL(dir_fd)
+        else:
+            carpeta = os.path.dirname(os.path.abspath(texto))
+            datos = STAT_REAL(carpeta)
+        clave = (datos.st_dev, datos.st_ino, nombre)
+        real = (info.st_dev, info.st_ino)
+        if real in self._traduccion:
+            return self._traducir(info)
+        anterior = self._ultimo.get(clave)
+        if anterior is None or anterior[:2] == real:
+            self._ultimo.setdefault(clave, (*real, real[1]))
+            return info
+        if self._abierto(anterior[:2]):
+            motivo = "anterior abierto"
+        elif self._con_nombre(carpeta, anterior[:2]):
+            motivo = "anterior con nombre"
+        else:
+            motivo = "reutilizado"
+        self.decisiones.append((nombre, motivo))
+        if motivo != "reutilizado":
+            self._ultimo[clave] = (*real, real[1])
+            return info
+        self._ultimo[clave] = (*real, anterior[2])
+        self._traduccion[real] = anterior[2]
+        return self._con_numero(info, anterior[2])
+
+    @staticmethod
+    def _abierto(identidad):
+        for nombre in os.listdir("/proc/self/fd"):
+            try:
+                info = FSTAT_REAL(int(nombre))
+            except OSError:
+                continue
+            if (info.st_dev, info.st_ino) == identidad:
+                return True
+        return False
+
+    @staticmethod
+    def _con_nombre(carpeta, identidad):
+        try:
+            nombres = os.listdir(carpeta)
+        except OSError:
+            return False
+        for nombre in nombres:
+            try:
+                if isinstance(carpeta, int):
+                    info = STAT_REAL(nombre, dir_fd=carpeta, follow_symlinks=False)
+                else:
+                    info = LSTAT_REAL(os.path.join(carpeta, nombre))
+            except OSError:
+                continue
+            if (info.st_dev, info.st_ino) == identidad:
+                return True
+        return False
+
+
+@pytest.fixture
+def reutilizar_inodos(monkeypatch):
+    """SimuladorInodos para el archivo de prueba de Velocidad. No es autouse: solo
+    lo usan las pruebas que lo piden, y monkeypatch lo deshace al terminar cada una."""
+    simulador = SimuladorInodos({ARCHIVO_PRUEBA})
+    monkeypatch.setattr(os, "stat", simulador.stat)
+    monkeypatch.setattr(os, "lstat", simulador.lstat)
+    monkeypatch.setattr(os, "fstat", simulador.fstat)
+    return simulador
