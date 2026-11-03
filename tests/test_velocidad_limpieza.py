@@ -342,3 +342,47 @@ def test_completa_y_texto_salen_de_lo_que_de_verdad_se_borro(limpieza, completa,
     """Nunca de «no hubo avisos»: sin la carpeta temporal borrada, la limpieza no está completa."""
     assert limpieza.completa is completa
     assert limpieza.texto() == texto
+
+
+# --- Sin archivo al limpiar: solo se afirma «no llegó a crearse» si fio nunca se lanzó ---
+
+NO_HABIA_ARCHIVO = (
+    "Se borró la carpeta temporal; no había archivo de prueba (fio no llegó a crearlo, o lo borró otro programa)."
+)
+NO_LLEGO_A_CREARSE = "Se borró la carpeta temporal; el archivo de prueba no llegó a crearse."
+
+
+def test_texto_si_fio_se_lanzo_y_no_habia_archivo():
+    limpieza = Limpieza(creo_directorio=True, fio_pudo_crear_archivo=True, directorio_borrado=True)
+    assert limpieza.completa
+    assert limpieza.texto() == NO_HABIA_ARCHIVO
+
+
+@pytest.mark.parametrize("modo", ["falla", "borra"], ids=["fio-falla-antes-de-crearlo", "lo-crea-y-desaparece"])
+def test_si_fio_se_lanzo_y_no_hay_archivo_no_afirma_que_no_llego_a_crearse(carpeta, fio_falso, modo):
+    """En la preparación Latido aún no tiene descriptor: no sabe si fio llegó a crear el archivo. Con
+    «borra», el fio falso lo crea y lo borra, y «no llegó a crearse» sería falso."""
+    fio_falso.configurar([modo])
+    with pytest.raises(ErrorVelocidad) as error:
+        _ejecucion(carpeta, fio_falso).ejecutar()
+    assert len(fio_falso.invocaciones()) == 1  # fio llegó a lanzarse
+    limpieza = error.value.limpieza
+    assert limpieza.directorio_borrado and not limpieza.archivo_borrado and limpieza.completa
+    assert limpieza.texto() == NO_HABIA_ARCHIVO
+    assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
+
+
+def test_si_fio_no_llego_a_lanzarse_el_archivo_no_llego_a_crearse(carpeta, fio_falso):
+    def falla_antes_de_lanzar_fio(progreso):
+        if progreso.indice == 0 and not progreso.terminado:
+            raise RuntimeError("fallo inventado antes de la preparación")
+
+    with pytest.raises(ErrorVelocidad, match="Error inesperado") as error:
+        _ejecucion(carpeta, fio_falso, al_progresar=falla_antes_de_lanzar_fio).ejecutar()
+    assert fio_falso.invocaciones() == []  # fio nunca se lanzó
+    limpieza = error.value.limpieza
+    assert limpieza.directorio_borrado and limpieza.completa
+    assert limpieza.texto() == NO_LLEGO_A_CREARSE
+    assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []

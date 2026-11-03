@@ -204,7 +204,9 @@ def test_error_de_fio_se_muestra_tal_cual(gtk, carpeta, fio_falso):
         "fio falló en «Preparando el archivo de prueba».\n"
         "fio terminó con el código 1. Mensaje de fio:\n"
         "fio: error inventado por el fio falso (err=22/Invalid argument)\n"
-        "Se borró la carpeta temporal; el archivo de prueba no llegó a crearse."  # el falso falla antes de crearlo
+        # fio se lanzó y falló en la preparación. El falso falla antes de crear el archivo, pero Latido no tiene
+        # descriptor y no lo sabe: solo ve que no había archivo.
+        "Se borró la carpeta temporal; no había archivo de prueba (fio no llegó a crearlo, o lo borró otro programa)."
     )
     assert os.listdir(carpeta) == []
     assert descriptores_hacia(carpeta) == []

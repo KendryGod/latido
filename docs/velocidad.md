@@ -156,6 +156,10 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   bien (se cancela, fio falla o deja algo que no sirve), la limpieza borra lo
   que haya en la ruta solo si es un archivo normal con un solo nombre. Un
   enlace simbólico (que no se sigue) o una carpeta no se borran, y se avisa.
+  Si en la ruta no hay nada y fio llegó a lanzarse, Latido no sabe si fio
+  llegó a crear el archivo y dice: «no había archivo de prueba (fio no llegó a
+  crearlo, o lo borró otro programa)». Solo dice «no llegó a crearse» si fio
+  nunca se lanzó.
   Modelo de amenaza: el directorio lo creó Latido con modo 0700, estaba vacío
   al crearse y antes de lanzar fio se comprobó que ese nombre no existía; en
   un sistema de archivos local, solo tu usuario o root pueden alterar lo que
@@ -182,6 +186,15 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   (medido con el kernel 7.2.14) un descriptor de carpeta no ve lo que se creó
   después de abrirlo, y el que Latido abrió al crear el directorio no vería
   nada de lo que fio o un intruso dejaron dentro.
+- **Límite conocido.** Latido comprueba con `stat` que el directorio temporal
+  es el suyo y justo después lo borra con `rmdir`, que borra **por nombre**.
+  Entre las dos llamadas hay una ventana: alguien con permiso de escritura en
+  la carpeta elegida podría poner otra carpeta con ese nombre, y `rmdir` la
+  borraría. Solo puede borrar una carpeta vacía (man 2 rmdir: "which must be
+  empty"), así que no hay datos que perder. Linux no tiene `rmdir` por
+  descriptor: `unlinkat` con `AT_REMOVEDIR` también recibe un nombre
+  (man 2 unlinkat). El borrado de restos (`latido/velocidad/restos.py`, al
+  confirmar el aviso de restos) tiene el mismo límite.
 - Una sola prueba a la vez.
 - Cerrar la ventana en plena prueba pide confirmación; al confirmar, Latido
   cancela, limpia y luego cierra.

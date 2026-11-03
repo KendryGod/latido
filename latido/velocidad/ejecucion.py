@@ -79,6 +79,7 @@ class _Cancelacion(Exception):
 @dataclass
 class Limpieza:
     creo_directorio: bool = False
+    fio_pudo_crear_archivo: bool = False  # fio llegó a lanzarse en la preparación
     archivo_borrado: bool = False
     archivo_borrado_por_otro: bool = False  # Latido lo tenía abierto y ya no le quedaba ningún nombre
     directorio_borrado: bool = False
@@ -99,6 +100,12 @@ class Limpieza:
             return "Se borraron el archivo de prueba y su carpeta temporal."
         if self.archivo_borrado_por_otro:
             return "Se borró la carpeta temporal; el archivo de prueba ya lo había borrado otro programa."
+        if self.fio_pudo_crear_archivo:
+            # Sin descriptor (la preparación no terminó), Latido no sabe si fio llegó a crearlo.
+            return (
+                "Se borró la carpeta temporal; no había archivo de prueba "
+                "(fio no llegó a crearlo, o lo borró otro programa)."
+            )
         return "Se borró la carpeta temporal; el archivo de prueba no llegó a crearse."
 
 
@@ -427,7 +434,9 @@ class Ejecucion:
         return []
 
     def _limpiar(self):
-        limpieza = Limpieza(creo_directorio=self.directorio is not None)
+        limpieza = Limpieza(
+            creo_directorio=self.directorio is not None, fio_pudo_crear_archivo=self._fio_pudo_crear_archivo
+        )
         try:
             proceso, self._proceso = self._proceso, None
             if proceso is not None and proceso.returncode is None:
