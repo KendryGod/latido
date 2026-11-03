@@ -395,6 +395,72 @@ def test_archivo_con_un_segundo_nombre_detiene_la_prueba_y_no_se_borra(tmp_path,
     assert descriptores_hacia(carpeta) == []
 
 
+# --- al limpiar, lo que hay en la ruta y no es el archivo de Latido se queda ---
+# Sin descriptor: la preparación no terminó bien (aquí, fio dejó en la ruta algo
+# que no es un archivo normal; cancelar o que fio falle en ese paso lleva a la
+# misma limpieza) y Latido no puede comparar identidad. Con descriptor: después
+# de una medición.
+
+NO_ES_NORMAL = "Lo que quedó en la ruta del archivo de prueba no es un archivo normal."
+
+
+def _en_su_lugar(que):
+    return (
+        f"El archivo de prueba cambió o desapareció durante la prueba: lo borró otro programa y en su lugar hay {que}. "
+        "Latido se detuvo por seguridad."
+    )
+
+
+def _ajeno_en_la_ruta(ej):
+    return [
+        f"En {ej.archivo} hay algo que no es el archivo de prueba de Latido; no se borró.",
+        f"No se borró {ej.directorio}: quedaron archivos que Latido no creó ({ARCHIVO_PRUEBA}). Revísalos tú.",
+    ]
+
+
+@pytest.mark.parametrize("modos, mensaje", [
+    (["enlaza"], NO_ES_NORMAL),
+    (["ok", "enlaza", "ok"], _en_su_lugar("un enlace simbólico")),
+], ids=["sin-descriptor", "con-descriptor"])
+def test_al_limpiar_un_enlace_simbolico_en_la_ruta_no_se_sigue_ni_se_borra(tmp_path, fio_falso, modos, mensaje):
+    fuera = tmp_path / "fuera.txt"
+    fuera.write_text("no tocar", encoding="utf-8")
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    fio_falso.configurar(modos, enlace=str(fuera))
+    ej = _ejecucion(carpeta, fio_falso)
+    with pytest.raises(ErrorVelocidad) as error:
+        ej.ejecutar()
+    assert error.value.mensaje == mensaje
+    assert len(fio_falso.invocaciones()) == modos.index("enlaza") + 1
+    assert os.path.islink(ej.archivo) and os.readlink(ej.archivo) == str(fuera)  # no se borró
+    assert fuera.read_text(encoding="utf-8") == "no tocar"  # no se siguió
+    assert not error.value.limpieza.archivo_borrado
+    assert error.value.limpieza.problemas == _ajeno_en_la_ruta(ej)
+    assert descriptores_hacia(carpeta) == []
+
+
+@pytest.mark.parametrize("modos, mensaje", [
+    (["carpeta"], NO_ES_NORMAL),
+    (["ok", "carpeta", "ok"], _en_su_lugar("una carpeta")),
+], ids=["sin-descriptor", "con-descriptor"])
+def test_al_limpiar_una_carpeta_en_la_ruta_no_se_borra(tmp_path, fio_falso, modos, mensaje):
+    """La carpeta está vacía a propósito: así ni un rmdir podría borrarla sin que esta prueba lo note."""
+    carpeta = tmp_path / "medir"
+    carpeta.mkdir()
+    fio_falso.configurar(modos)
+    ej = _ejecucion(carpeta, fio_falso)
+    with pytest.raises(ErrorVelocidad) as error:
+        ej.ejecutar()
+    assert error.value.mensaje == mensaje
+    assert len(fio_falso.invocaciones()) == modos.index("carpeta") + 1
+    assert os.path.isdir(ej.archivo) and not os.path.islink(ej.archivo)
+    assert os.listdir(ej.archivo) == []  # sigue ahí
+    assert not error.value.limpieza.archivo_borrado
+    assert error.value.limpieza.problemas == _ajeno_en_la_ruta(ej)
+    assert descriptores_hacia(carpeta) == []
+
+
 def _estado(ino=42, dev=7, nombres=1, tamano=TAMANO, tipo=stat.S_IFREG):
     """Un os.stat_result fabricado: modo, inodo, dispositivo, enlaces, uid, gid, tamaño y tres tiempos."""
     return os.stat_result((tipo | 0o600, ino, dev, nombres, 0, 0, tamano, 0, 0, 0))

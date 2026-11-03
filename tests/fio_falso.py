@@ -19,6 +19,7 @@ crearlo, si hacía falta):
                inodo que el borrado: tmpfs y btrfs no lo repiten, pero en la
                CI (run 41575524354) se repitió.
   enlaza       lo borra y pone en su lugar un enlace simbólico a "enlace"
+  carpeta      lo borra y pone en su lugar una carpeta vacía
   borra        lo borra sin poner nada en su lugar
   mueve        le cambia el nombre a "destino"
   enlace_duro  le agrega un segundo nombre en "destino"
@@ -137,6 +138,9 @@ def main():
     elif modo == "enlaza":
         os.unlink(op["filename"])
         os.symlink(configuracion["enlace"], op["filename"])
+    elif modo == "carpeta":
+        os.unlink(op["filename"])
+        os.mkdir(op["filename"])
     elif modo == "borra":
         os.unlink(op["filename"])
     elif modo == "mueve":
