@@ -1,0 +1,111 @@
+Latido: informe de disco
+Versión de Latido: 0.0.1
+Fecha: 2026-11-03 14:30
+Es una lectura puntual: muestra el disco en el momento en que se leyó.
+
+DISCO
+  Modelo:               KINGSTON SNV2S1000G
+  Firmware:             SBI02105
+  Capacidad:            1.00 TB (1,000,204,886,016 bytes)
+  Interfaz:             NVMe
+  Disco del sistema:    sí
+
+SALUD: Bueno
+  El disco no reporta problemas en sus datos SMART.
+  Por qué:
+  - El disco no reporta advertencias críticas.
+  - 0 errores de medio.
+  - Repuesto disponible: 100 % (umbral 10 %).
+  - Vida estimada restante: 99 %.
+
+AUTENTICIDAD: No concluyente
+  Por qué:
+  - La capacidad coincide en smartctl y en el kernel: 1.00 TB (1,000,204,886,016
+    bytes).
+  - Latido aún no verifica la capacidad real.
+  Qué no se comprobó:
+  - La capacidad real: hace falta escribir y verificar todo el disco (con f3, en
+    una fase posterior).
+  - Que el modelo y la capacidad que informa el disco sean ciertos: Latido solo
+    compara lo que dicen dos fuentes del propio sistema.
+  - Una prueba de velocidad sola no prueba la autenticidad.
+
+CIFRAS CLAVE
+  Temperatura:          46 °C · Normal
+                        Umbrales del disco: advertencia 83 °C · crítica 90 °C
+  Vida usada:           1 % · Normal
+                        Estimación del propio disco. Queda 99 %.
+  Reserva disponible:   100 % · Normal
+                        Umbral del disco: 10 %
+  Horas encendido:      4,921 h · Informativo
+                        934 ciclos de encendido
+  Datos escritos:       13.08 TB · Informativo
+                        Leídos: 16.60 TB
+  Errores de medios:    0 · Normal
+                        Datos que el disco no pudo corregir
+
+TODOS LOS DATOS
+  Registro de salud NVMe:
+  - Namespace del registro: -1
+    A qué parte del disco corresponde este registro. -1 significa todo el disco
+    (todos los namespaces).
+  - Advertencia crítica: 0 (ninguna)
+    Banderas que el propio disco activa cuando detecta un problema serio. 0
+    significa ninguna advertencia.
+  - Temperatura: 46 °C
+    Temperatura actual del disco.
+  - Repuesto disponible: 100 %
+    Porcentaje de bloques de reserva que le quedan al disco para reemplazar
+    celdas dañadas. Lo ideal es 100 %.
+  - Umbral de repuesto: 10 %
+    Si el repuesto disponible baja de este porcentaje, el disco activa una
+    advertencia crítica.
+  - Desgaste: 1 %
+    Estimación del fabricante de cuánta vida útil se ha consumido. Puede pasar
+    de 100 %: eso no significa que el disco haya fallado, sino que superó la
+    resistencia prevista.
+  - Datos leídos: 16.60 TB (32,418,229 unidades)
+    Cuánto se ha leído del disco. Cada unidad equivale a 512 000 bytes.
+  - Datos escritos: 13.08 TB (25,537,435 unidades)
+    Cuánto se ha escrito en el disco; es la medida principal del desgaste por
+    uso. Cada unidad equivale a 512 000 bytes.
+  - Órdenes de lectura: 213,063,774
+    Cuántas órdenes de lectura le ha enviado el equipo al disco.
+  - Órdenes de escritura: 311,229,086
+    Cuántas órdenes de escritura le ha enviado el equipo al disco.
+  - Tiempo ocupado: 15,516 min
+    Minutos que el controlador del disco ha pasado atendiendo órdenes.
+  - Encendidos: 934
+    Cuántas veces se ha encendido el disco.
+  - Horas encendido: 4,921
+    Total de horas que el disco ha estado encendido.
+  - Apagados inseguros: 46
+    Veces que el disco perdió la energía sin aviso previo, por ejemplo por un
+    corte de luz o al desconectarlo sin expulsarlo.
+  - Errores de medio: 0
+    Errores de datos que el disco no pudo corregir. En un disco sano es 0.
+  - Entradas del registro de errores: 0
+    Cuántos errores ha anotado el controlador en toda su vida. No todos son
+    daños: también se anotan órdenes que el disco rechazó.
+  - Tiempo sobre temperatura de advertencia: 0 min
+    Minutos que el disco ha pasado en o por encima de su temperatura de
+    advertencia, sin llegar a la crítica.
+  - Tiempo sobre temperatura crítica: 0 min
+    Minutos que el disco ha pasado en o por encima de su temperatura crítica. Si
+    es mayor que 0, Latido lo marca como PRECAUCIÓN.
+
+VELOCIDAD
+  Archivo de prueba de 256 MiB, 1 pasada, sistema de archivos btrfs. MB/s =
+  1,000,000 bytes por segundo; el número es el promedio de las pasadas.
+  SEQ1M Q8T1
+    Lectura: 1,369.57 MB/s · 1,306 IOPS
+    Escritura: 383.48 MB/s · 366 IOPS
+  SEQ1M Q1T1
+    Lectura: 1,369.57 MB/s · 1,306 IOPS
+    Escritura: 771.37 MB/s · 736 IOPS
+  RND4K Q32T1
+    Lectura: 568.72 MB/s · 138,847 IOPS
+    Escritura: 84.10 MB/s · 20,531 IOPS
+  RND4K Q1T1
+    Lectura: 54.83 MB/s · 13,386 IOPS
+    Escritura: 78.77 MB/s · 19,230 IOPS

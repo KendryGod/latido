@@ -26,6 +26,21 @@ class FilaRegistro:
     explicacion: str
 
 
+# Palabra y frase de cada estado (docs/diseno.md). Las usan la interfaz y el informe TXT.
+TEXTO_ESTADO = {
+    Estado.BUENO: "Bueno",
+    Estado.PRECAUCION: "Precaución",
+    Estado.MALO: "Peligro",
+    Estado.DESCONOCIDO: "Sin datos",
+}
+FRASE_ESTADO = {
+    Estado.BUENO: "El disco no reporta problemas en sus datos SMART.",
+    Estado.PRECAUCION: "Hay señales de riesgo. Mira el porqué.",
+    Estado.MALO: "El disco reporta fallas: no le confíes datos importantes.",
+    Estado.DESCONOCIDO: "No hay datos suficientes para opinar.",
+}
+
+
 @dataclass
 class Disparo:
     """Una línea de «Por qué»: la regla que se disparó (docs/veredicto.md) y lo que dice.

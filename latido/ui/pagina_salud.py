@@ -6,6 +6,7 @@ import traceback
 from gi.repository import Adw, GLib, Gtk, Pango
 
 from latido.salud import Estado, InformeSalud, formato
+from latido.salud.modelo import FRASE_ESTADO, TEXTO_ESTADO
 from latido.salud.autenticidad import FALSO, NO_COMPROBADO, NO_CONCLUYENTE, SIN_SENALES, SOSPECHOSO, evaluar_autenticidad
 from latido.salud.cifras import SIN_VALOR, cifras_clave
 from latido.salud.reglas import POR_ID
@@ -14,16 +15,13 @@ from latido.sistema.lectura import ErrorLectura, TipoError
 # Estado: (texto, clase de latido/ui/estilo.py, ícono simbólico, frase).
 # El ícono y el texto hacen que el color no sea la única señal.
 APARIENCIA = {
-    Estado.BUENO: ("Bueno", "latido-bueno", "object-select-symbolic", "El disco no reporta problemas en sus datos SMART."),
-    Estado.PRECAUCION: (
-        "Precaución", "latido-precaucion", "dialog-warning-symbolic", "Hay señales de riesgo. Mira el porqué."
-    ),
-    Estado.MALO: (
-        "Peligro", "latido-malo", "dialog-error-symbolic", "El disco reporta fallas: no le confíes datos importantes."
-    ),
-    Estado.DESCONOCIDO: (
-        "Sin datos", "latido-desconocido", "dialog-question-symbolic", "No hay datos suficientes para opinar."
-    ),
+    estado: (TEXTO_ESTADO[estado], clase, icono, FRASE_ESTADO[estado])
+    for estado, clase, icono in (
+        (Estado.BUENO, "latido-bueno", "object-select-symbolic"),
+        (Estado.PRECAUCION, "latido-precaucion", "dialog-warning-symbolic"),
+        (Estado.MALO, "latido-malo", "dialog-error-symbolic"),
+        (Estado.DESCONOCIDO, "latido-desconocido", "dialog-question-symbolic"),
+    )
 }
 # Estado de una cifra clave: (palabra, clase, ícono). El color nunca va solo.
 APARIENCIA_CIFRA = {
@@ -212,6 +210,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self.detectando = False
         self.informe = None  # el último informe mostrado (para exportar)
         self.disco_informe = None
+        self.al_cambiar_informe = lambda: None  # la ventana activa o desactiva «Exportar informe»
 
         caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         for lado in ("top", "bottom", "start", "end"):
@@ -373,6 +372,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self.selector.set_sensitive(bool(self._discos) and not self.leyendo)
         self.aviso.set_text(disco.aviso if disco and disco.aviso else "")
         self.aviso.set_visible(bool(disco and disco.aviso))
+        self.al_cambiar_informe()
         if not self._discos:
             detalle = self._error_deteccion or "Latido busca discos NVMe y SATA. Conecta uno y vuelve a intentarlo."
             self._mostrar_estado(
@@ -509,6 +509,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
         if error.tipo is TipoError.HERRAMIENTAS and "Falta smartctl" in error.mensaje:
             titulo = "Falta smartctl"
         self._mostrar_estado(titulo, descripcion or error.mensaje, icono, "Reintentar")
+        self.al_cambiar_informe()
 
     def mostrar_informe(self, informe, disco=None):
         self._limpiar()
@@ -520,8 +521,10 @@ class PaginaSalud(Gtk.ScrolledWindow):
                 "El disco no entregó datos SMART", "\n".join(informe.motivos) or formato.NO_DISPONIBLE,
                 "drive-harddisk-symbolic", "Reintentar",
             )
+            self.al_cambiar_informe()
             return
         self.informe, self.disco_informe = informe, disco
+        self.al_cambiar_informe()
         self.vistas.set_visible_child_name("informe")
         texto, _, _, frase = APARIENCIA[informe.estado]
         self._poner_estado(texto, frase, informe.estado)

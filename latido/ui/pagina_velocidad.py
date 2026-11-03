@@ -7,6 +7,7 @@ from typing import Callable
 
 from gi.repository import Adw, Gio, GLib, Graphene, Gtk, Pango
 
+from latido.informe_txt import VelocidadMedida
 from latido.velocidad import formato
 from latido.velocidad.carpeta import espacio_necesario, margen, revisar_carpeta
 from latido.velocidad.ejecucion import Cancelado, Ejecucion, ErrorVelocidad
@@ -138,6 +139,7 @@ class PaginaVelocidad(Gtk.Box):
         self._al_terminar = []
         self._parcial = None
         self._configuracion_en_marcha = None
+        self.velocidad_medida = None  # la última prueba terminada, para el informe TXT
 
         self.banner = Adw.Banner(revealed=False, button_label="Revisar…")
         self.banner.connect("button-clicked", self._al_pulsar_revisar_restos)
@@ -488,6 +490,9 @@ class PaginaVelocidad(Gtk.Box):
                     resumen = resultado.resumen(prueba, direccion)
                     if resumen is not None:
                         self.cuadros[prueba.clave].columnas[direccion].mostrar(resumen, resultado.pasadas)
+            info = self.revision.info if self.revision else None
+            self.velocidad_medida = VelocidadMedida(resultado, self._configuracion_en_marcha,
+                                                    info.tipo if info else None)
             partes = ["Prueba terminada.", resultado.limpieza.texto() if resultado.limpieza else ""]
             self._mostrar_mensaje(" ".join(p for p in partes if p) + "".join("\n" + a for a in resultado.avisos))
         self._actualizar_resumen()

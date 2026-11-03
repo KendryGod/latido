@@ -1,8 +1,11 @@
 """Ventana principal de Latido (docs/diseno.md, «Estructura»)."""
 
-from gi.repository import Adw, Gio, Gtk
+from datetime import datetime
+
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from latido import __version__
+from latido.informe_txt import ErrorExportar, construir_texto, escribir_informe, nombre_por_defecto
 from latido.ui.estilo import cargar_estilo
 from latido.ui.pagina_salud import PaginaSalud
 from latido.ui.pagina_velocidad import PaginaVelocidad
@@ -21,8 +24,9 @@ ATAJOS = {
 
 class VentanaPrincipal(Adw.ApplicationWindow):
     def __init__(self, discos, lector, error_deteccion=None, aviso_desarrollo=None, servicios_velocidad=None,
-                 detectar=None, **kwargs):
+                 detectar=None, demo=False, **kwargs):
         super().__init__(title="Latido", default_width=ANCHO, default_height=ALTO, **kwargs)
+        self.demo = demo
         self.set_size_request(ANCHO_MINIMO, ALTO_MINIMO)
         cargar_estilo()
         self.dialogo_cerrar = None
@@ -70,6 +74,7 @@ class VentanaPrincipal(Adw.ApplicationWindow):
             accion.connect("activate", lambda _accion, _parametro, funcion=funcion: funcion())
             self.add_action(accion)
         self.lookup_action("exportar").set_enabled(False)
+        self.pagina_salud.al_cambiar_informe = self._actualizar_exportar
 
         self.pila.connect("notify::visible-child", self._al_cambiar_pestana)
         self.connect("close-request", self._al_pedir_cierre)
@@ -93,8 +98,52 @@ class VentanaPrincipal(Adw.ApplicationWindow):
         else:
             self.pagina_velocidad.actualizar()
 
+    def _actualizar_exportar(self):
+        """Exportar informe solo tiene sentido con un informe de salud en pantalla."""
+        self.lookup_action("exportar").set_enabled(self.pagina_salud.informe is not None)
+
+    def texto_del_informe(self, fecha=None):
+        if self.pagina_salud.informe is None:
+            return None
+        return construir_texto(
+            self.pagina_salud.informe, self.pagina_salud.disco_informe,
+            velocidad=self.pagina_velocidad.velocidad_medida, fecha=fecha, demo=self.demo,
+        )
+
     def exportar(self):
-        """Exportar informe: llega en B5."""
+        """Ctrl+E: elige dónde guardar (Gtk.FileDialog pide confirmación antes de reemplazar un archivo)."""
+        ahora = datetime.now()
+        texto = self.texto_del_informe(ahora)
+        if texto is None:
+            self.avisar("Primero lee la salud de un disco.")
+            return
+        dialogo = Gtk.FileDialog(title="Exportar informe", initial_name=nombre_por_defecto(ahora), modal=True)
+        dialogo.save(self, None, self._destino_elegido, texto)
+
+    def _destino_elegido(self, dialogo, resultado, texto):
+        try:
+            archivo = dialogo.save_finish(resultado)
+        except GLib.Error as error:
+            if not error.matches(Gtk.DialogError.quark(), Gtk.DialogError.DISMISSED):
+                self.avisar(f"No se pudo usar el selector de archivos: {error.message}")
+            return
+        ruta = archivo.get_path() if archivo else None
+        if not ruta:
+            self.avisar("Elige una carpeta de un disco local.")
+            return
+        self.guardar_informe(ruta, texto)
+
+    def guardar_informe(self, ruta, texto):
+        try:
+            escribir_informe(ruta, texto)
+        except ErrorExportar as error:
+            self.avisar(str(error))
+            return False
+        except OSError as error:
+            self.avisar(f"No se pudo guardar el informe: {error.strerror}.")
+            return False
+        self.avisar("Informe guardado.")
+        return True
 
     def mostrar_acerca_de(self):
         self.crear_acerca_de().present(self)
