@@ -106,6 +106,17 @@ def test_falta_fio_se_dice_y_no_deja_iniciar(gtk, carpeta):
     pagina.elegir_carpeta(str(carpeta))
     assert pagina.fila_fio.get_subtitle() == problema
     assert not pagina.boton.get_sensitive()
+    assert pagina.vistas.get_visible_child_name() == "sin_fio"
+    assert pagina.pagina_sin_fio.get_title() == "Falta fio"
+    assert pagina.pagina_sin_fio.get_description() == problema
+
+
+def test_sin_fio_reintentar_vuelve_a_comprobar(gtk):
+    espia = Espia()
+    problema = "Falta fio (/usr/bin/fio). Instálalo con: sudo dnf install fio fio-engine-libaio"
+    pagina = _abrir_pestana(_ventana(_servicios(estado_fio=EstadoFio(problemas=[problema]), espia=espia)))
+    pagina.boton_reintentar.emit("clicked")
+    assert espia.llamadas.count("comprobar_fio") == 2
 
 
 def test_resumen_antes_de_iniciar(gtk, carpeta):

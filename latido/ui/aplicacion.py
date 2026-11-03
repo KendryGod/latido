@@ -6,7 +6,7 @@ from gi.repository import Adw, Gio
 
 from latido.sistema.discos import Disco, ErrorDeteccion, listar_discos
 from latido.sistema.lectura import cargar_fixture, leer_salud
-from latido.ui.ventana import VentanaPrincipal
+from latido.ui.ventana import ATAJOS, VentanaPrincipal
 
 ID_APLICACION = "io.github.kendrygod.latido"
 
@@ -43,6 +43,7 @@ def crear_ventana(aplicacion=None, ruta_fixture=None):
         discos,
         lambda disco: leer_salud(disco.ruta_lectura),
         error_deteccion=error,
+        detectar=listar_discos,
         application=aplicacion,
     )
 
@@ -52,6 +53,19 @@ class Aplicacion(Adw.Application):
         flags = Gio.ApplicationFlags.NON_UNIQUE if ruta_fixture else Gio.ApplicationFlags.DEFAULT_FLAGS
         super().__init__(application_id=ID_APLICACION, flags=flags)
         self.ruta_fixture = ruta_fixture
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        salir = Gio.SimpleAction(name="salir")
+        salir.connect("activate", lambda _accion, _parametro: self.salir())
+        self.add_action(salir)
+        for accion, teclas in ATAJOS.items():
+            self.set_accels_for_action(accion, teclas)
+
+    def salir(self):
+        """Ctrl+Q o «Salir»: cierra cada ventana. Con una prueba en marcha, la ventana pide confirmación."""
+        for ventana in list(self.get_windows()):
+            ventana.close()
 
     def do_activate(self):
         ventana = self.get_active_window() or crear_ventana(self, self.ruta_fixture)

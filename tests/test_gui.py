@@ -62,7 +62,6 @@ CLASES_DE_ESTADO = {"latido-bueno", "latido-precaucion", "latido-malo", "latido-
     ("sintetico_precaucion.json", "PRECAUCIÓN", "latido-precaucion", "dialog-warning-symbolic"),
     ("sintetico_malo.json", "MALO", "latido-malo", "dialog-error-symbolic"),
     ("sintetico_desconocido.json", "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic"),
-    ("nvme_sin_root.json", "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic"),
 ])
 def test_cada_estado_aplica_su_clase_icono_y_texto(gtk, archivo, texto, clase, icono):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
@@ -183,7 +182,7 @@ def test_tamano_por_defecto_y_minimo(gtk):
     from latido.ui.ventana import ALTO, ALTO_MINIMO, ANCHO, ANCHO_MINIMO
 
     ventana = _ventana([_disco()], lambda disco: None)
-    assert ventana.get_default_size() == (ANCHO, ALTO) == (800, 900)
+    assert ventana.get_default_size() == (ANCHO, ALTO) == (900, 700)  # cabe en 1366x768
     assert ventana.get_size_request() == (ANCHO_MINIMO, ALTO_MINIMO) == (400, 500)
 
 
@@ -199,11 +198,18 @@ def test_registro_dentro_de_area_con_scroll(gtk):
 
 def test_lo_que_falta_dice_no_disponible(gtk):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_desconocido.json"))  # sin percentage_used
+    assert pagina.filas_resumen["vida"][1].get_text() == "No disponible"
+    assert pagina.filas_disco["serie"].get_text() == "No disponible"
+
+
+def test_disco_sin_datos_smart_muestra_una_pagina_de_estado(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
     pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_sin_root.json"))
-    for _, etiqueta in pagina.filas_resumen.values():
-        assert etiqueta.get_text() == "No disponible"
-    for etiqueta in pagina.filas_disco.values():
-        assert etiqueta.get_text() == "No disponible"
+    assert pagina.mostrando_estado()
+    assert pagina.pagina_estado.get_title() == "El disco no entregó datos SMART"
+    assert pagina.boton.get_label() == "Reintentar" and pagina.boton.get_visible()
+    assert pagina.informe is None
 
 
 def test_lectura_en_hilo_y_resultado_con_idle_add(gtk):
@@ -235,14 +241,12 @@ def test_error_no_deja_datos_viejos(gtk):
     for _ in range(2):
         pagina.boton.emit("clicked")
         esperar(GLib, lambda: not pagina.leyendo)
-    assert pagina.etiqueta_estado.get_text() == "DESCONOCIDO"
-    assert "latido-desconocido" in pagina.insignia.get_css_classes()
+    assert pagina.mostrando_estado()
+    assert pagina.pagina_estado.get_title() == "No se leyó el disco"
     assert not pagina.grupo_resumen.get_visible()
     assert not pagina.grupo_registro.get_visible()
-    assert pagina._filas_registro == []
-    assert [f.get_title() for f in pagina._filas_motivos] == [
-        "Cerraste la ventana de contraseña. No se leyó nada del disco."
-    ]
+    assert pagina._filas_registro == [] and pagina._filas_motivos == []
+    assert pagina.informe is None
 
 
 def test_disco_sd_deshabilitado_con_aviso(gtk):
@@ -258,8 +262,9 @@ def test_disco_sd_deshabilitado_con_aviso(gtk):
 
 def test_sin_discos(gtk):
     pagina = _ventana([], lambda disco: None).pagina_salud
-    assert not pagina.boton.get_sensitive()
-    assert "No se encontró ningún disco" in pagina.etiqueta_frase.get_text()
+    assert pagina.mostrando_estado()
+    assert pagina.pagina_estado.get_title() == "No se encontró ningún disco"
+    assert not pagina.boton.get_visible()  # sin forma de volver a buscar, no hay «Reintentar»
 
 
 def test_estado_inicial_de_informe_es_desconocido():
@@ -267,3 +272,130 @@ def test_estado_inicial_de_informe_es_desconocido():
     from latido.salud import InformeSalud
 
     assert InformeSalud().estado is Estado.DESCONOCIDO
+
+
+# --- B2: ventana y estados ---
+
+
+def test_selector_en_la_cabecera_con_modelo_y_capacidad_sin_serie(gtk):
+    ventana = _ventana([_disco(modelo="DISCO A", tamano=10**12), _disco(nombre="nvme1n1", modelo="DISCO A",
+                        tamano=10**12), _disco(nombre="sda", modelo="OTRO", tamano=5 * 10**11)], lambda disco: None)
+    assert ventana.selector.is_ancestor(ventana.cabecera)
+    modelo = ventana.selector.get_model()
+    textos = [modelo.get_string(i) for i in range(modelo.get_n_items())]
+    assert textos == ["DISCO A · 1.00 TB · nvme0n1", "DISCO A · 1.00 TB · nvme1n1", "OTRO · 500.0 GB"]
+    assert "/dev/" not in " ".join(textos)
+
+
+def test_el_selector_solo_se_ve_en_salud(gtk):
+    ventana = _ventana([_disco()], lambda disco: None)
+    assert ventana.selector.get_visible()
+    ventana.pila.set_visible_child(ventana.pagina_velocidad)
+    assert not ventana.selector.get_visible()
+
+
+def test_acciones_atajos_y_menu(gtk):
+    from latido.ui.ventana import ATAJOS
+
+    ventana = _ventana([_disco()], lambda disco: None)
+    for nombre in ("actualizar", "exportar", "acerca"):
+        assert ventana.lookup_action(nombre) is not None, nombre
+    assert ATAJOS == {"win.actualizar": ["<Control>r"], "win.exportar": ["<Control>e"], "app.salir": ["<Control>q"]}
+    menu = ventana.boton_menu.get_menu_model()
+    etiquetas = [menu.get_item_attribute_value(i, "label").get_string() for i in range(menu.get_n_items())]
+    acciones = [menu.get_item_attribute_value(i, "action").get_string() for i in range(menu.get_n_items())]
+    assert etiquetas == ["Exportar informe…", "Acerca de Latido", "Salir"]
+    assert acciones == ["win.exportar", "win.acerca", "app.salir"]
+    assert ventana.boton_actualizar.get_action_name() == "win.actualizar"
+
+
+def test_ctrl_r_lee_el_disco_en_salud(gtk):
+    GLib, _ = gtk
+    llamadas = []
+
+    def lector(disco):
+        llamadas.append(disco.nombre)
+        return cargar_fixture(FIXTURES / "nvme_real.json")
+
+    ventana = _ventana([_disco()], lector)
+    ventana.activate_action("win.actualizar", None)
+    esperar(GLib, lambda: not ventana.pagina_salud.leyendo)
+    assert llamadas == ["nvme0n1"]
+    assert not ventana.pagina_salud.mostrando_estado()
+
+
+def test_punto_de_corte_baja_las_pestanas(gtk):
+    from latido.ui.ventana import ANCHO_ANGOSTO
+
+    ventana = _ventana([_disco()], lambda disco: None)
+    assert ANCHO_ANGOSTO == "560sp"
+    assert ventana.angosto.get_condition().to_string() == "max-width: 560sp"
+    assert ventana.barra_inferior.get_stack() is ventana.pila
+
+
+@pytest.mark.parametrize("tipo, titulo, icono", [
+    (TipoError.CANCELADO, "No se leyó el disco", "dialog-password-symbolic"),
+    (TipoError.NO_AUTORIZADO, "No se obtuvo permiso", "dialog-password-symbolic"),
+    (TipoError.HERRAMIENTAS, "Falta smartctl", "system-software-install-symbolic"),
+    (TipoError.AYUDANTE, "No se pudo leer el disco", "dialog-warning-symbolic"),
+])
+def test_errores_en_una_pagina_de_estado_con_reintentar(gtk, tipo, titulo, icono):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    mensaje = "Falta smartctl (/usr/bin/smartctl). Instálalo con: sudo dnf install smartmontools"
+    pagina.mostrar_error(ErrorLectura(tipo, mensaje))
+    assert pagina.mostrando_estado()
+    assert pagina.pagina_estado.get_title() == titulo
+    assert pagina.pagina_estado.get_icon_name() == icono
+    assert pagina.boton.get_label() == "Reintentar" and pagina.boton.get_visible()
+    assert "dialog-error-symbolic" != pagina.pagina_estado.get_icon_name()  # nunca el ícono rojo
+
+
+def test_cancelar_la_contrasena_es_un_mensaje_amable(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_error(ErrorLectura(TipoError.CANCELADO, "Cerraste la ventana de contraseña."))
+    assert pagina.pagina_estado.get_description() == (
+        "Cerraste la ventana de contraseña, así que Latido no leyó nada. Cuando quieras, vuelve a intentarlo."
+    )
+    assert not set(pagina.pagina_estado.get_css_classes()) & {"error", "latido-malo"}
+
+
+def test_reintentar_vuelve_a_leer(gtk):
+    GLib, _ = gtk
+    respuestas = [ErrorLectura(TipoError.CANCELADO, "x"), cargar_fixture(FIXTURES / "nvme_real.json")]
+
+    def lector(disco):
+        respuesta = respuestas.pop(0)
+        if isinstance(respuesta, Exception):
+            raise respuesta
+        return respuesta
+
+    pagina = _ventana([_disco()], lector).pagina_salud
+    pagina.boton.emit("clicked")
+    esperar(GLib, lambda: not pagina.leyendo)
+    assert pagina.boton.get_label() == "Reintentar"
+    pagina.boton.emit("clicked")
+    esperar(GLib, lambda: not pagina.leyendo)
+    assert not pagina.mostrando_estado() and respuestas == []
+
+
+def test_sin_discos_reintentar_vuelve_a_buscarlos(gtk):
+    GLib, _ = gtk
+    pagina = _ventana([], lambda disco: None).pagina_salud
+    pagina._detectar = lambda: [_disco()]
+    pagina._al_cambiar_disco()
+    assert pagina.boton.get_label() == "Reintentar" and pagina.boton.get_sensitive()
+    pagina.boton.emit("clicked")
+    esperar(GLib, lambda: not pagina.detectando)
+    assert pagina.disco_seleccionado().nombre == "nvme0n1"
+    assert pagina.pagina_estado.get_title() == "Leer la salud del disco"
+    assert pagina.boton.get_label() == "Leer salud"
+
+
+def test_acerca_de(gtk):
+    from latido import __version__
+
+    dialogo = _ventana([_disco()], lambda disco: None).crear_acerca_de()
+    assert dialogo.get_application_name() == "Latido"
+    assert dialogo.get_version() == __version__
+    assert dialogo.get_license_type() == gtk[1].License.GPL_3_0
+

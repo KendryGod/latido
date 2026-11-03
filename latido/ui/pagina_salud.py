@@ -36,6 +36,19 @@ NOTA = (
     "Las reglas de color son criterio propio de Latido."
 )
 
+ANCHO_CONTENIDO = 760  # Adw.Clamp (docs/diseno.md)
+
+# Errores de lectura: (título, ícono, descripción o None para usar el mensaje del error).
+TEXTOS_ERROR = {
+    TipoError.CANCELADO: (
+        "No se leyó el disco", "dialog-password-symbolic",
+        "Cerraste la ventana de contraseña, así que Latido no leyó nada. Cuando quieras, vuelve a intentarlo.",
+    ),
+    TipoError.NO_AUTORIZADO: ("No se obtuvo permiso", "dialog-password-symbolic", None),
+    TipoError.HERRAMIENTAS: ("Faltan piezas para leer la salud", "system-software-install-symbolic", None),
+    None: ("No se pudo leer el disco", "dialog-warning-symbolic", None),
+}
+
 
 def _fila(titulo, subtitulo=None):
     fila = Adw.ActionRow(title=titulo, use_markup=False)
@@ -125,37 +138,54 @@ def _etiqueta_valor(texto, ancho=24):
     return etiqueta
 
 
+def etiquetas_selector(discos):
+    """Modelo · capacidad, sin número de serie. Si dos discos quedan iguales, se agrega su nombre (nvme1n1)."""
+    cortas = [disco.etiqueta_corta for disco in discos]
+    return [
+        f"{corta} · {disco.nombre}" if cortas.count(corta) > 1 else corta
+        for corta, disco in zip(cortas, discos)
+    ]
+
+
 class PaginaSalud(Gtk.ScrolledWindow):
-    def __init__(self, discos, lector, error_deteccion=None):
+    def __init__(self, discos, lector, error_deteccion=None, detectar=None):
         super().__init__(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-        self._discos = discos
+        self._discos = list(discos)
         self._lector = lector
+        self._detectar = detectar
+        self._error_deteccion = error_deteccion
         self.leyendo = False
+        self.detectando = False
+        self.informe = None  # el último informe mostrado (para exportar)
+        self.disco_informe = None
 
         caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         for lado in ("top", "bottom", "start", "end"):
             getattr(caja, f"set_margin_{lado}")(18)
-        self.set_child(Adw.Clamp(maximum_size=720, child=caja))
+        self.set_child(Adw.Clamp(maximum_size=ANCHO_CONTENIDO, child=caja))
 
-        # Selector de disco y botón.
-        fila_selector = Gtk.Box(spacing=12)
-        self.selector = Gtk.DropDown.new_from_strings([d.etiqueta for d in discos])
+        # Selector de disco: la ventana lo pone en la cabecera.
+        self.selector = Gtk.DropDown.new_from_strings(etiquetas_selector(self._discos))
         self.selector.set_factory(_fabrica_selector(elipsis=True))
         self.selector.set_list_factory(_fabrica_selector(elipsis=False))
-        self.selector.set_hexpand(True)
         self.selector.connect("notify::selected", self._al_cambiar_disco)
-        self.spinner = Adw.Spinner(visible=False)
-        self.boton = Gtk.Button(label="Leer salud")
-        self.boton.add_css_class("suggested-action")
-        self.boton.connect("clicked", self._al_pulsar_leer)
-        fila_selector.append(self.selector)
-        fila_selector.append(self.spinner)
-        fila_selector.append(self.boton)
-        caja.append(fila_selector)
 
         self.aviso = Gtk.Label(xalign=0, wrap=True, visible=False)
         self.aviso.add_css_class("dimmed")
         caja.append(self.aviso)
+
+        # Antes de leer, leyendo, errores y vacíos: Adw.StatusPage con un botón.
+        self.boton = Gtk.Button(label="Leer salud", halign=Gtk.Align.CENTER)
+        self.boton.add_css_class("suggested-action")
+        self.boton.add_css_class("pill")
+        self.boton.connect("clicked", self._al_pulsar_boton)
+        self.pagina_estado = Adw.StatusPage(child=self.boton, vexpand=True)
+        self.contenido = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        self.vistas = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vhomogeneous=False)
+        self.vistas.add_named(self.pagina_estado, "estado")
+        self.vistas.add_named(self.contenido, "informe")
+        caja.append(self.vistas)
+        caja = self.contenido  # lo de abajo es el informe
 
         # Panel grande de estado.
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -219,12 +249,27 @@ class PaginaSalud(Gtk.ScrolledWindow):
         nota.add_css_class("caption")
         caja.append(nota)
 
-        if error_deteccion:
-            self._mostrar_vacio(error_deteccion)
-        elif not discos:
-            self._mostrar_vacio("No se encontró ningún disco NVMe ni SATA.")
+        self._al_cambiar_disco()
+
+    # --- estados sin informe: Adw.StatusPage ---
+
+    def _mostrar_estado(self, titulo, descripcion, icono=None, boton=None, cargando=False):
+        """Muestra la página de estado. La descripción es texto: se escapa para Pango."""
+        if cargando:
+            self.pagina_estado.set_icon_name(None)
+            self.pagina_estado.set_paintable(Adw.SpinnerPaintable.new(self.pagina_estado))
         else:
-            self._al_cambiar_disco()
+            self.pagina_estado.set_paintable(None)
+            self.pagina_estado.set_icon_name(icono)
+        self.pagina_estado.set_title(titulo)
+        self.pagina_estado.set_description(GLib.markup_escape_text(descripcion))
+        self.boton.set_visible(boton is not None)
+        if boton is not None:
+            self.boton.set_label(boton)
+        self.vistas.set_visible_child_name("estado")
+
+    def mostrando_estado(self):
+        return self.vistas.get_visible_child_name() == "estado"
 
     # --- selección ---
 
@@ -237,34 +282,77 @@ class PaginaSalud(Gtk.ScrolledWindow):
     def _al_cambiar_disco(self, *_):
         disco = self.disco_seleccionado()
         self._limpiar()
-        self._poner_estado("—", "Elige un disco y pulsa «Leer salud».")
+        self.informe = self.disco_informe = None
+        self._poner_estado("—", "")
         self.etiqueta_disco.set_text(disco.etiqueta if disco else "")
         self.selector.set_tooltip_text(disco.etiqueta if disco else None)
-        habilitado = disco is not None and disco.habilitado
-        self.boton.set_sensitive(habilitado and not self.leyendo)
+        self.selector.set_sensitive(bool(self._discos) and not self.leyendo)
         self.aviso.set_text(disco.aviso if disco and disco.aviso else "")
         self.aviso.set_visible(bool(disco and disco.aviso))
+        if not self._discos:
+            detalle = self._error_deteccion or "Latido busca discos NVMe y SATA. Conecta uno y vuelve a intentarlo."
+            self._mostrar_estado(
+                "No se encontró ningún disco", detalle, "drive-harddisk-symbolic",
+                "Reintentar" if self._detectar else None,
+            )
+            self.boton.set_sensitive(self._detectar is not None and not self.detectando)
+            return
+        self._mostrar_estado(
+            "Leer la salud del disco",
+            "Latido lee lo que el propio disco guarda sobre su salud (SMART). Si se abre la ventana de "
+            "contraseña, es solo para leer: Latido no escribe en el disco.",
+            "drive-harddisk-symbolic", "Leer salud",
+        )
+        self.boton.set_sensitive(disco is not None and disco.habilitado and not self.leyendo)
 
-    def _mostrar_vacio(self, mensaje):
-        self._limpiar()
-        self.selector.set_sensitive(False)
+    def _al_pulsar_boton(self, _boton):
+        if not self._discos:
+            self.volver_a_detectar()
+        else:
+            self.leer()
+
+    def volver_a_detectar(self):
+        """«Reintentar» sin discos: vuelve a buscarlos (lsblk) en un hilo."""
+        if self._detectar is None or self.detectando:
+            return
+        self.detectando = True
         self.boton.set_sensitive(False)
-        self._poner_estado("—", mensaje)
-        self.etiqueta_disco.set_text("")
+        threading.Thread(target=self._detectar_en_hilo, daemon=True).start()
+
+    def _detectar_en_hilo(self):
+        try:
+            resultado = self._detectar()
+        except Exception as error:  # ErrorDeteccion u otro: se muestra tal cual
+            resultado = error
+        GLib.idle_add(self._terminar_deteccion, resultado)
+
+    def _terminar_deteccion(self, resultado):
+        self.detectando = False
+        if isinstance(resultado, Exception):
+            self._discos, self._error_deteccion = [], f"No se pudieron detectar los discos. {resultado}"
+        else:
+            self._discos, self._error_deteccion = list(resultado), None
+        modelo = self.selector.get_model()
+        modelo.splice(0, modelo.get_n_items(), etiquetas_selector(self._discos))
+        self.selector.set_selected(0 if self._discos else Gtk.INVALID_LIST_POSITION)
+        self._al_cambiar_disco()
+        return GLib.SOURCE_REMOVE
 
     # --- lectura en un hilo ---
 
-    def _al_pulsar_leer(self, _boton):
+    def leer(self):
+        """Lee la salud del disco elegido (botón de la página o Ctrl+R)."""
         disco = self.disco_seleccionado()
         if disco is None or not disco.habilitado or self.leyendo:
             return
         self.leyendo = True
         self.boton.set_sensitive(False)
         self.selector.set_sensitive(False)
-        self.spinner.set_visible(True)
         self._limpiar()
-        self._poner_estado(
-            "Leyendo…", "Si se abre la ventana de contraseña, es para leer: Latido no escribe en el disco."
+        self._poner_estado("Leyendo…", "")
+        self._mostrar_estado(
+            "Leyendo…", "Si se abre la ventana de contraseña, es para leer: Latido no escribe en el disco.",
+            cargando=True,
         )
         threading.Thread(target=self._leer_en_hilo, args=(disco,), daemon=True).start()
 
@@ -283,7 +371,6 @@ class PaginaSalud(Gtk.ScrolledWindow):
 
     def _terminar_lectura(self, disco, resultado):
         self.leyendo = False
-        self.spinner.set_visible(False)
         self.selector.set_sensitive(True)
         self.boton.set_sensitive(disco.habilitado)
         if isinstance(resultado, ErrorLectura):
@@ -328,13 +415,29 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self.grupo_motivos.set_visible(bool(motivos))
 
     def mostrar_error(self, error, disco=None):
+        """Errores en una Adw.StatusPage con «Reintentar». Cerrar la ventana de contraseña no es un error rojo."""
         self._limpiar()
-        self._poner_estado(APARIENCIA[Estado.DESCONOCIDO][0], "No se pudo leer el disco.", Estado.DESCONOCIDO)
+        self.informe = self.disco_informe = None
+        self._poner_estado("—", "")
         self.etiqueta_disco.set_text(disco.etiqueta if disco else "")
-        self._agregar_motivos(error.mensaje.split("\n"))
+        titulo, icono, descripcion = TEXTOS_ERROR.get(error.tipo, TEXTOS_ERROR[None])
+        if error.tipo is TipoError.HERRAMIENTAS and "Falta smartctl" in error.mensaje:
+            titulo = "Falta smartctl"
+        self._mostrar_estado(titulo, descripcion or error.mensaje, icono, "Reintentar")
 
     def mostrar_informe(self, informe, disco=None):
         self._limpiar()
+        if not informe.registro_nvme and not informe.atributos_ata:
+            # Sin un solo dato SMART no hay informe que mostrar.
+            self.informe = self.disco_informe = None
+            self._poner_estado("—", "")
+            self._mostrar_estado(
+                "El disco no entregó datos SMART", "\n".join(informe.motivos) or formato.NO_DISPONIBLE,
+                "drive-harddisk-symbolic", "Reintentar",
+            )
+            return
+        self.informe, self.disco_informe = informe, disco
+        self.vistas.set_visible_child_name("informe")
         texto, _, _, frase = APARIENCIA[informe.estado]
         self._poner_estado(texto, frase, informe.estado)
 

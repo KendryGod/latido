@@ -33,6 +33,14 @@ class Disco:
     aviso: str | None
 
     @property
+    def etiqueta_corta(self):
+        """Para el selector de la cabecera: modelo · capacidad. Nunca el número de serie."""
+        partes = [self.modelo or self.nombre]
+        if self.tamano is not None:
+            partes.append(formato.capacidad(self.tamano))
+        return " · ".join(partes)
+
+    @property
     def etiqueta(self):
         partes = [self.modelo or self.nombre]
         if self.tamano is not None:

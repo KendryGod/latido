@@ -145,11 +145,22 @@ class PaginaVelocidad(Gtk.Box):
 
         desplazable = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
         self.desplazable = desplazable
-        self.append(desplazable)
+        # Sin fio no hay prueba posible: Adw.StatusPage con «Reintentar».
+        self.boton_reintentar = Gtk.Button(label="Reintentar", halign=Gtk.Align.CENTER)
+        self.boton_reintentar.add_css_class("pill")
+        self.boton_reintentar.connect("clicked", lambda _boton: self.actualizar())
+        self.pagina_sin_fio = Adw.StatusPage(
+            icon_name="system-software-install-symbolic", title="Falta fio", child=self.boton_reintentar,
+            vexpand=True,
+        )
+        self.vistas = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
+        self.vistas.add_named(desplazable, "prueba")
+        self.vistas.add_named(self.pagina_sin_fio, "sin_fio")
+        self.append(self.vistas)
         caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         for lado in ("top", "bottom", "start", "end"):
             getattr(caja, f"set_margin_{lado}")(18)
-        self._contenido = Adw.Clamp(maximum_size=860, child=caja)
+        self._contenido = Adw.Clamp(maximum_size=760, child=caja)  # docs/diseno.md
         desplazable.set_child(self._contenido)
 
         # Configuración.
@@ -229,6 +240,13 @@ class PaginaVelocidad(Gtk.Box):
         if not self.en_marcha:
             self.revisar_restos()
         self._actualizar_resumen()
+
+    def actualizar(self):
+        """Ctrl+R o «Reintentar»: vuelve a comprobar fio y a buscar restos (nunca con una prueba en marcha)."""
+        if self.en_marcha:
+            return
+        self.estado_fio = None
+        self.al_mostrar()
 
     def revisar_restos(self):
         carpeta = self.servicios.leer_ultima_carpeta()
@@ -314,6 +332,12 @@ class PaginaVelocidad(Gtk.Box):
                 self.fila_fio.set_subtitle("\n".join(self.estado_fio.problemas))
             else:
                 self.fila_fio.set_subtitle(f"{self.estado_fio.version or 'fio'} con motor libaio")
+        sin_fio = self.estado_fio is not None and bool(self.estado_fio.problemas) and not self.en_marcha
+        if sin_fio:
+            problemas = "\n".join(self.estado_fio.problemas)
+            self.pagina_sin_fio.set_title("Falta fio" if "Falta fio" in problemas else "fio no está listo")
+            self.pagina_sin_fio.set_description(GLib.markup_escape_text(problemas))
+        self.vistas.set_visible_child_name("sin_fio" if sin_fio else "prueba")
         for fila in self._filas_avisos:
             self.grupo_resumen.remove(fila)
         self._filas_avisos = []
