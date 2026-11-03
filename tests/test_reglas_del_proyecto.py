@@ -55,3 +55,11 @@ def test_cada_estado_define_fondo_texto_y_paleta_de_iconos():
         assert re.search(r"background-color: @\w+;", bloque), clase
         texto = re.search(r"(?m)^\s*color: @(\w+);", bloque).group(1)
         assert f"-gtk-icon-palette: success @{texto}, warning @{texto}, error @{texto};" in bloque, clase
+
+
+def test_latido_no_pone_prefer_dark_theme():
+    """El esquema de color sigue al sistema con Adw.StyleManager: Latido nunca toca
+    GtkSettings:gtk-application-prefer-dark-theme (libadwaita avisa que no está soportado)."""
+    for archivo in CODIGO:
+        texto = archivo.read_text(encoding="utf-8")
+        assert "prefer-dark-theme" not in texto and "prefer_dark_theme" not in texto, archivo

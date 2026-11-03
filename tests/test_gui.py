@@ -40,6 +40,14 @@ def test_al_abrir_no_lee_ni_pide_contrasena(gtk):
     assert not pagina.grupo_resumen.get_visible()
 
 
+def test_el_esquema_de_color_sigue_al_sistema(gtk):
+    """Latido no fuerza claro ni oscuro: Adw.StyleManager queda en ColorScheme.DEFAULT."""
+    from gi.repository import Adw
+
+    _ventana([_disco()], lambda disco: None)
+    assert Adw.StyleManager.get_default().get_color_scheme() == Adw.ColorScheme.DEFAULT
+
+
 def test_pestana_salud(gtk):
     ventana = _ventana([_disco()], lambda disco: None)
     pagina = ventana.pila.get_page(ventana.pagina_salud)
