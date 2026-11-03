@@ -33,3 +33,13 @@ def mb_s(bytes_por_segundo):
 
 def iops(valor):
     return f"{valor:,.0f}"
+
+
+def latencia(nanosegundos):
+    """µs con un decimal hasta 999.9 µs; desde ahí, ms con dos. «—» si no hay dato."""
+    if nanosegundos is None:
+        return "—"
+    microsegundos = nanosegundos / 1000
+    if microsegundos < 999.95:
+        return f"{microsegundos:,.1f} µs"
+    return f"{microsegundos / 1000:,.2f} ms"

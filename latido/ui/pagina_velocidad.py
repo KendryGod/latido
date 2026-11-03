@@ -1,11 +1,12 @@
 """Pestaña "Velocidad": lectura y escritura con fio, en una carpeta que elige el usuario."""
 
+import re
 import threading
 import traceback
 from dataclasses import dataclass
 from typing import Callable
 
-from gi.repository import Adw, Gio, GLib, Graphene, Gtk, Pango
+from gi.repository import Adw, Gio, GLib, GObject, Graphene, Gtk
 
 from latido.informe_txt import VelocidadMedida
 from latido.velocidad import formato
@@ -27,11 +28,17 @@ from latido.velocidad.restos import ErrorResto, borrar_resto, buscar_restos, lee
 from latido.velocidad.resultado import ResultadoVelocidad
 
 NOTA = (
-    "MB/s = 1,000,000 bytes por segundo. IOPS = operaciones por segundo. "
-    "El número grande es el promedio de las pasadas; debajo van la mejor y la peor. "
+    "MB/s = 1,000,000 bytes por segundo. IOPS = operaciones por segundo. Latencia: tiempo medio de cada "
+    "operación, desde que fio la crea hasta que termina. El número grande es el promedio de las pasadas; debajo "
+    "van la mejor y la peor. La barra compara cada resultado con el más alto de la tabla. "
     f"Cada medición dura como máximo {SEGUNDOS_POR_MEDICION} s. Los resultados solo se muestran aquí: no se guardan."
 )
 SIN_CARPETA = "Elige dónde crear el archivo de prueba"
+ORDEN_DIRECCIONES = (Direccion.LECTURA, Direccion.ESCRITURA)  # el de Configuracion.pasos()
+MEDICIONES = len(PRUEBAS) * len(ORDEN_DIRECCIONES)  # 8: cada prueba, en lectura y en escritura
+ICONO_BIEN = "object-select-symbolic"
+ICONO_INFO = "dialog-information-symbolic"
+ICONO_AVISO = "dialog-warning-symbolic"
 
 
 @dataclass
@@ -55,73 +62,120 @@ def _fila(titulo, subtitulo=None, icono=None):
     return fila
 
 
-class ColumnaResultado(Gtk.Box):
-    """Lectura o escritura de un cuadro: MB/s grande, IOPS debajo, mejor y peor."""
+def numero_de_medicion(paso):
+    """De 1 a 8: qué prueba y en qué dirección, en el orden de Configuracion.pasos()."""
+    return PRUEBAS.index(paso.prueba) * len(ORDEN_DIRECCIONES) + ORDEN_DIRECCIONES.index(paso.direccion) + 1
 
-    def __init__(self, titulo):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        encabezado = Gtk.Label(label=titulo)
-        encabezado.add_css_class("caption-heading")
-        self.valor = Gtk.Label()
+
+def texto_del_paso(paso, configuracion):
+    """«Paso n de 8: …» en las mediciones; la preparación va aparte y dice cuánto escribe."""
+    if paso.es_preparacion:
+        return f"{paso.descripcion()} (escribe {formato.tamano(configuracion.tamano)})"
+    return f"Paso {numero_de_medicion(paso)} de {MEDICIONES}: {paso.descripcion(configuracion.pasadas)}"
+
+
+def sin_cortes(texto):
+    """Espacio no separable entre número y unidad («4 KiB», «1 hilo») y en «cola 32»: no se parten en dos líneas."""
+    texto = re.sub(r"(\d) (?=MiB|KiB|hilo)", "\\1\u00a0", texto)
+    return re.sub(r"\bcola (?=\d)", "cola\u00a0", texto)
+
+
+def _caption(etiqueta, *clases):
+    for clase in ("caption", "dimmed", *clases):
+        etiqueta.add_css_class(clase)
+    return etiqueta
+
+
+class CeldaResultado(Gtk.Box):
+    """Lectura o escritura de una prueba: MB/s grande, barra relativa, IOPS y latencia, mejor y peor."""
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
+        numero = Adw.WrapBox(child_spacing=6)  # si no cabe, la unidad pasa abajo: nunca se corta
+        self.valor = Gtk.Label(xalign=0, valign=Gtk.Align.BASELINE_FILL)
         self.valor.add_css_class("title-1")
-        unidad = Gtk.Label(label="MB/s")
-        unidad.add_css_class("dimmed")
-        self.iops = Gtk.Label()
-        # Ancho máximo con ajuste de línea: así un texto largo no ensancha el
-        # cuadro y siguen cabiendo dos cuadros por fila.
-        self.extremos = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, max_width_chars=20)
-        self.extremos.add_css_class("caption")
-        self.extremos.add_css_class("dimmed")
-        self.estado = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, max_width_chars=20)
+        self.valor.add_css_class("numeric")
+        self.unidad = Gtk.Label(label="MB/s", xalign=0, valign=Gtk.Align.BASELINE_FILL)
+        self.unidad.add_css_class("title-4")
+        self.unidad.add_css_class("dimmed")
+        numero.append(self.valor)
+        numero.append(self.unidad)
+        # Barra relativa al resultado más alto de la tabla. Sin los umbrales de GTK («low», «high», «full»):
+        # con ellos libadwaita pinta una barra corta con el color de advertencia y una llena de verde, y aquí
+        # no hay estados, solo magnitudes.
+        self.barra = Gtk.LevelBar(min_value=0, max_value=1, value=0)
+        for nombre in (Gtk.LEVEL_BAR_OFFSET_LOW, Gtk.LEVEL_BAR_OFFSET_HIGH, Gtk.LEVEL_BAR_OFFSET_FULL):
+            self.barra.remove_offset_value(nombre)
+        self.secundario = Adw.WrapBox(child_spacing=6)
+        self.iops = _caption(Gtk.Label(xalign=0), "numeric")
+        self.separador = _caption(Gtk.Label(label="·"))
+        self.latencia = _caption(Gtk.Label(xalign=0), "numeric")
+        for etiqueta in (self.iops, self.separador, self.latencia):
+            self.secundario.append(etiqueta)
+        self.extremos = _caption(Gtk.Label(xalign=0, wrap=True), "numeric")
+        self.estado = Gtk.Label(xalign=0, wrap=True)
         self.estado.add_css_class("caption")
-        for hijo in (encabezado, self.valor, unidad, self.iops, self.extremos, self.estado):
+        for hijo in (numero, self.barra, self.secundario, self.extremos, self.estado):
             self.append(hijo)
+        self.promedio = None
         self.limpiar()
 
+    @staticmethod
+    def _poner(etiqueta, texto):
+        etiqueta.set_text(texto)
+        etiqueta.set_visible(bool(texto))
+
     def limpiar(self):
+        self.promedio = None
         self.valor.set_text("—")
+        self.unidad.set_visible(False)  # «—» solo
+        self.barra.set_value(0)
         self.iops.set_text("")
-        self.extremos.set_text("")
-        self.estado.set_text("Pendiente")
+        self.latencia.set_text("—")
+        self.secundario.set_visible(False)
+        self._poner(self.extremos, "")
+        self._poner(self.estado, "")
 
     def midiendo(self, pasada, pasadas):
-        self.estado.set_text(f"Midiendo… pasada {pasada} de {pasadas}")
+        self._poner(self.estado, f"Midiendo… pasada {pasada} de {pasadas}")
 
     def mostrar(self, resumen, pasadas):
+        self.promedio = resumen.promedio
         self.valor.set_text(formato.mb_s(resumen.promedio))
+        self.unidad.set_visible(True)
         self.iops.set_text(f"{formato.iops(resumen.iops_promedio)} IOPS")
-        if resumen.pasadas > 1:
-            self.extremos.set_text(f"Mejor {formato.mb_s(resumen.mejor)} MB/s\nPeor {formato.mb_s(resumen.peor)} MB/s")
-        else:
-            self.extremos.set_text("")
-        self.estado.set_text("" if resumen.pasadas == pasadas else f"{resumen.pasadas} de {pasadas} pasadas")
+        self.latencia.set_text(formato.latencia(resumen.latencia_promedio))
+        con_latencia = resumen.latencia_promedio is not None
+        self.separador.set_visible(con_latencia)
+        self.latencia.set_visible(con_latencia)
+        self.secundario.set_visible(True)
+        self._poner(self.extremos, f"Mejor {formato.mb_s(resumen.mejor)} · peor {formato.mb_s(resumen.peor)}"
+                    if resumen.pasadas > 1 else "")
+        self._poner(self.estado, "" if resumen.pasadas == pasadas else f"{resumen.pasadas} de {pasadas} pasadas")
+
+    def relativa(self, maximo):
+        self.barra.set_value(self.promedio / maximo if self.promedio and maximo else 0)
 
     def sin_terminar(self):
-        if self.valor.get_text() == "—":
-            self.estado.set_text("Sin resultado")
+        self._poner(self.estado, "Sin resultado" if self.promedio is None else self.estado.get_text())
 
 
-class CuadroPrueba(Gtk.Box):
+class FilaPrueba:
+    """Una prueba en la rejilla: nombre y descripción a la izquierda; lectura y escritura a la derecha."""
+
     def __init__(self, prueba):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.prueba = prueba
-        self.add_css_class("card")
-        for lado in ("top", "bottom", "start", "end"):
-            getattr(self, f"set_margin_{lado}")(0)
-        interior = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=14, margin_bottom=14,
-                           margin_start=14, margin_end=14)
+        self.cabecera = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, valign=Gtk.Align.START)
         titulo = Gtk.Label(label=prueba.nombre, xalign=0)
-        titulo.add_css_class("title-3")
-        descripcion = Gtk.Label(label=prueba.descripcion, xalign=0, wrap=True)
-        descripcion.add_css_class("caption")
-        descripcion.add_css_class("dimmed")
-        columnas = Gtk.Box(spacing=12, homogeneous=True)
-        self.columnas = {Direccion.LECTURA: ColumnaResultado("Lectura"), Direccion.ESCRITURA: ColumnaResultado("Escritura")}
-        for columna in self.columnas.values():
-            columnas.append(columna)
-        for hijo in (titulo, descripcion, columnas):
-            interior.append(hijo)
-        self.append(interior)
+        titulo.add_css_class("heading")
+        self.descripcion = _caption(Gtk.Label(label=sin_cortes(prueba.descripcion), xalign=0, wrap=True,
+                                              max_width_chars=16))
+        self.cabecera.append(titulo)
+        self.cabecera.append(self.descripcion)
+        self.columnas = {direccion: CeldaResultado() for direccion in ORDEN_DIRECCIONES}
+        self.celdas = Gtk.Box(spacing=18, homogeneous=True, hexpand=True)
+        for celda in self.columnas.values():
+            self.celdas.append(celda)
 
 
 class PaginaVelocidad(Gtk.Box):
@@ -202,29 +256,59 @@ class PaginaVelocidad(Gtk.Box):
         self._filas_avisos = []
         caja.append(self.grupo_resumen)
 
-        # Botón, progreso y mensajes.
+        # Un solo botón: Iniciar o Cancelar.
         self.boton = Gtk.Button(label="Iniciar", halign=Gtk.Align.CENTER)
         self.boton.add_css_class("suggested-action")
         self.boton.add_css_class("pill")
         self.boton.connect("clicked", self._al_pulsar_boton)
         caja.append(self.boton)
-        self.progreso = Gtk.ProgressBar(show_text=True, visible=False)
-        self.progreso.set_ellipsize(Pango.EllipsizeMode.END)
-        caja.append(self.progreso)
-        self.mensaje = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
-        caja.append(self.mensaje)
 
-        # Resultados: cuatro cuadros.
-        self.flujo = Gtk.FlowBox(
-            selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=1,
-            max_children_per_line=2, column_spacing=12, row_spacing=12,
-        )
+        # Progreso: «Paso n de 8» en una etiqueta que se ajusta (nunca se corta) y la barra.
+        self.zona_progreso = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
+        self.etiqueta_paso = Gtk.Label(xalign=0, wrap=True)
+        self.etiqueta_paso.add_css_class("heading")
+        self.progreso = Gtk.ProgressBar(show_text=False)
+        self.zona_progreso.append(self.etiqueta_paso)
+        self.zona_progreso.append(self.progreso)
+        caja.append(self.zona_progreso)
+
+        # Mensaje del final (también el de la limpieza): ícono y texto, entre el botón y los resultados.
+        self.caja_mensaje = Gtk.Box(visible=False)
+        self.caja_mensaje.add_css_class("card")
+        interior_mensaje = Gtk.Box(spacing=12, margin_top=12, margin_bottom=12, margin_start=18, margin_end=18,
+                                   hexpand=True)
+        self.icono_mensaje = Gtk.Image(icon_name=ICONO_INFO, valign=Gtk.Align.START)
+        self.mensaje = Gtk.Label(xalign=0, wrap=True, selectable=True, hexpand=True)
+        interior_mensaje.append(self.icono_mensaje)
+        interior_mensaje.append(self.mensaje)
+        self.caja_mensaje.append(interior_mensaje)
+        caja.append(self.caja_mensaje)
+
+        # Resultados: una rejilla, una fila por prueba y Lectura | Escritura.
+        self.resultados = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        titulo_resultados = Gtk.Label(label="Resultados", xalign=0)
+        titulo_resultados.add_css_class("heading")
+        self.tarjeta_resultados = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.tarjeta_resultados.add_css_class("card")
+        self.rejilla = Gtk.Grid(column_spacing=18, row_spacing=12, margin_top=18, margin_bottom=18,
+                                margin_start=18, margin_end=18)
+        encabezado = Gtk.Box(spacing=18, homogeneous=True, hexpand=True)
+        self.encabezados = [Gtk.Label(label=direccion.texto.capitalize(), xalign=0) for direccion in ORDEN_DIRECCIONES]
+        for etiqueta in self.encabezados:
+            etiqueta.add_css_class("heading")
+            encabezado.append(etiqueta)
+        self.rejilla.attach(encabezado, 1, 0, 1, 1)
         self.cuadros = {}
-        for prueba in PRUEBAS:
-            cuadro = CuadroPrueba(prueba)
-            self.cuadros[prueba.clave] = cuadro
-            self.flujo.append(cuadro)
-        caja.append(self.flujo)
+        for numero, prueba in enumerate(PRUEBAS):
+            fila = FilaPrueba(prueba)
+            self.cuadros[prueba.clave] = fila
+            self.rejilla.attach(Gtk.Separator(), 0, 2 * numero + 1, 2, 1)
+            self.rejilla.attach(fila.cabecera, 0, 2 * numero + 2, 1, 1)
+            self.rejilla.attach(fila.celdas, 1, 2 * numero + 2, 1, 1)
+        self.tarjeta_resultados.append(self.rejilla)
+        self.resultados.append(titulo_resultados)
+        self.resultados.append(self.tarjeta_resultados)
+        caja.append(self.resultados)
 
         nota = Gtk.Label(label=NOTA, wrap=True, xalign=0)
         nota.add_css_class("caption")
@@ -237,7 +321,7 @@ class PaginaVelocidad(Gtk.Box):
             self.velocidad_medida = demo
             self.fila_carpeta.set_subtitle("Modo demo: no se mide nada")
             self.mostrar_resultado(demo.resultado)
-            self._mostrar_mensaje("Resultados de ejemplo. En el modo demo no se ejecuta fio.")
+            self._mostrar_mensaje("Resultados de ejemplo. En el modo demo no se ejecuta fio.", ICONO_INFO)
             self._actualizar_boton()
 
     # --- al abrir la pestaña ---
@@ -288,7 +372,7 @@ class PaginaVelocidad(Gtk.Box):
         self.dialogo_restos = None
         if respuesta != "borrar" or self.en_marcha:
             return
-        mensajes = []
+        mensajes, icono = [], ICONO_BIEN
         for resto in self.restos:
             if not resto.se_puede_borrar:
                 continue
@@ -296,7 +380,8 @@ class PaginaVelocidad(Gtk.Box):
                 mensajes.append(self.servicios.borrar_resto(resto))
             except ErrorResto as error:
                 mensajes.append(str(error))
-        self._mostrar_mensaje("\n".join(mensajes))
+                icono = ICONO_AVISO
+        self._mostrar_mensaje("\n".join(mensajes), icono)
         self.revisar_restos()
 
     # --- configuración y resumen previo ---
@@ -319,11 +404,12 @@ class PaginaVelocidad(Gtk.Box):
             archivo = dialogo.select_folder_finish(resultado)
         except GLib.Error as error:
             if not error.matches(Gtk.DialogError.quark(), Gtk.DialogError.DISMISSED):
-                self._mostrar_mensaje(f"No se pudo usar el selector de carpetas: {error.message}")
+                self._mostrar_mensaje(f"No se pudo usar el selector de carpetas: {error.message}", ICONO_AVISO)
             return
         ruta = archivo.get_path() if archivo else None
         if not ruta:
-            self._mostrar_mensaje("La carpeta elegida no tiene una ruta local; elige una carpeta de un disco.")
+            self._mostrar_mensaje("La carpeta elegida no tiene una ruta local; elige una carpeta de un disco.",
+                                  ICONO_AVISO)
             return
         self.elegir_carpeta(ruta)
 
@@ -396,10 +482,11 @@ class PaginaVelocidad(Gtk.Box):
 
     def _actualizar_boton(self):
         if self.en_marcha:
-            self.boton.set_label("Cancelar")
+            cancelando = self.ejecucion is not None and self.ejecucion.cancelada
+            self.boton.set_label("Cancelando…" if cancelando else "Cancelar")
             self.boton.remove_css_class("suggested-action")
             self.boton.add_css_class("destructive-action")
-            self.boton.set_sensitive(self.ejecucion is not None and not self.ejecucion.cancelada)
+            self.boton.set_sensitive(self.ejecucion is not None and not cancelando)
         else:
             self.boton.set_label("Iniciar")
             self.boton.remove_css_class("destructive-action")
@@ -408,9 +495,11 @@ class PaginaVelocidad(Gtk.Box):
         for control in (self.boton_carpeta, self.fila_tamano, self.fila_pasadas):
             control.set_sensitive(not self.en_marcha and not self.modo_demo)
 
-    def _mostrar_mensaje(self, texto):
+    def _mostrar_mensaje(self, texto, icono=ICONO_INFO):
+        """El ícono acompaña al texto, nunca va solo."""
         self.mensaje.set_text(texto)
-        self.mensaje.set_visible(bool(texto))
+        self.icono_mensaje.set_from_icon_name(icono)
+        self.caja_mensaje.set_visible(bool(texto))
 
     # --- ejecución en un hilo ---
 
@@ -428,13 +517,12 @@ class PaginaVelocidad(Gtk.Box):
         self.banner.set_revealed(False)
         self._configuracion_en_marcha = configuracion
         self._parcial = ResultadoVelocidad(configuracion.pasadas)
-        for cuadro in self.cuadros.values():
-            for columna in cuadro.columnas.values():
-                columna.limpiar()
+        for celda in self._celdas():
+            celda.limpiar()
         self._mostrar_mensaje("")
         self.progreso.set_fraction(0)
-        self.progreso.set_text("Comprobando fio y la carpeta…")
-        self.progreso.set_visible(True)
+        self.etiqueta_paso.set_text("Comprobando fio y la carpeta…")
+        self.zona_progreso.set_visible(True)
         self.ejecucion = self.servicios.crear_ejecucion(
             self.carpeta, configuracion, al_progresar=lambda progreso: GLib.idle_add(self._mostrar_progreso, progreso)
         )
@@ -445,7 +533,7 @@ class PaginaVelocidad(Gtk.Box):
         return True
 
     def _desplazar_a_resultados(self):
-        """Lleva la vista al botón, el progreso y los cuadros."""
+        """Lleva la vista al botón, el progreso o el mensaje, y los resultados."""
         ok, punto = self.boton.compute_point(self._contenido, Graphene.Point().init(0, 0))
         if ok:
             ajuste = self.desplazable.get_vadjustment()
@@ -466,42 +554,48 @@ class PaginaVelocidad(Gtk.Box):
         configuracion = self._configuracion_en_marcha
         paso = progreso.paso
         if not progreso.terminado:
-            texto = f"Paso {progreso.indice + 1} de {progreso.total}: {paso.descripcion(configuracion.pasadas)}"
-            if paso.es_preparacion:
-                texto += f" (escribe {formato.tamano(configuracion.tamano)})"
-            else:
+            if not paso.es_preparacion:
                 self.cuadros[paso.prueba.clave].columnas[paso.direccion].midiendo(paso.pasada, configuracion.pasadas)
-            self.progreso.set_text(texto)
+            self.etiqueta_paso.set_text(texto_del_paso(paso, configuracion))
             self.progreso.set_fraction(progreso.indice / progreso.total)
         else:
             self.progreso.set_fraction((progreso.indice + 1) / progreso.total)
             if progreso.medicion is not None:
                 self._parcial.agregar(paso, progreso.medicion)
-                columna = self.cuadros[paso.prueba.clave].columnas[paso.direccion]
-                columna.mostrar(self._parcial.resumen(paso.prueba, paso.direccion), configuracion.pasadas)
+                celda = self.cuadros[paso.prueba.clave].columnas[paso.direccion]
+                celda.mostrar(self._parcial.resumen(paso.prueba, paso.direccion), configuracion.pasadas)
+                self._actualizar_barras()
         return GLib.SOURCE_REMOVE
 
     def _terminar(self, resultado):
         self.en_marcha = False
         self.ejecucion = None
-        self.progreso.set_visible(False)
+        self.zona_progreso.set_visible(False)
         if isinstance(resultado, ErrorVelocidad):
             texto = resultado.mensaje
             if resultado.limpieza is not None:
                 texto += "\n" + resultado.limpieza.texto()
-            self._mostrar_mensaje(texto)
+            self._mostrar_mensaje(texto, ICONO_AVISO)
             self._marcar_sin_terminar()
         elif isinstance(resultado, Cancelado):
-            self._mostrar_mensaje("Prueba cancelada. " + resultado.limpieza.texto())
+            self._mostrar_mensaje("Prueba cancelada. " + resultado.limpieza.texto(),
+                                  ICONO_INFO if resultado.limpieza.completa else ICONO_AVISO)
             self._marcar_sin_terminar()
         else:
             self.mostrar_resultado(resultado)
             info = self.revision.info if self.revision else None
             self.velocidad_medida = VelocidadMedida(resultado, self._configuracion_en_marcha,
                                                     info.tipo if info else None)
-            partes = ["Prueba terminada.", resultado.limpieza.texto() if resultado.limpieza else ""]
-            self._mostrar_mensaje(" ".join(p for p in partes if p) + "".join("\n" + a for a in resultado.avisos))
+            limpieza = resultado.limpieza
+            partes = ["Prueba terminada.", limpieza.texto() if limpieza else ""]
+            if resultado.avisos or (limpieza is not None and not limpieza.completa):
+                icono = ICONO_AVISO
+            else:
+                icono = ICONO_INFO if limpieza is None else ICONO_BIEN
+            self._mostrar_mensaje(" ".join(p for p in partes if p) + "".join("\n" + a for a in resultado.avisos),
+                                  icono)
         self._actualizar_resumen()
+        GLib.idle_add(self._desplazar_a_resultados)  # que se vea el mensaje de la limpieza
         pendientes, self._al_terminar = self._al_terminar, []
         for funcion in pendientes:
             funcion()
@@ -513,11 +607,29 @@ class PaginaVelocidad(Gtk.Box):
                 resumen = resultado.resumen(prueba, direccion)
                 if resumen is not None:
                     self.cuadros[prueba.clave].columnas[direccion].mostrar(resumen, resultado.pasadas)
+        self._actualizar_barras()
+
+    def _celdas(self):
+        return [celda for fila in self.cuadros.values() for celda in fila.columnas.values()]
+
+    def _actualizar_barras(self):
+        """Cada barra, relativa al resultado más alto que hay en la tabla."""
+        maximo = max((celda.promedio for celda in self._celdas() if celda.promedio), default=0)
+        for celda in self._celdas():
+            celda.relativa(maximo)
+
+    def ajustes_angosto(self):
+        """Para el Adw.Breakpoint de la ventana (< 560sp): números un poco más chicos, para que quepan.
+
+        El valor va como GObject.Value de tipo GStrv: con una lista de Python, libadwaita 1.9 aborta el
+        proceso («Unable to add setter … from value of type 'PyObject'»).
+        """
+        clases = GObject.Value(GObject.TYPE_STRV, ["title-2", "numeric"])
+        return [(celda.valor, "css-classes", clases) for celda in self._celdas()]
 
     def _marcar_sin_terminar(self):
-        for cuadro in self.cuadros.values():
-            for columna in cuadro.columnas.values():
-                columna.sin_terminar()
+        for celda in self._celdas():
+            celda.sin_terminar()
 
     def cancelar(self, al_terminar=None):
         """Pide a fio que se detenga; la limpieza la hace el hilo de la prueba."""
@@ -530,7 +642,7 @@ class PaginaVelocidad(Gtk.Box):
             return
         if self.ejecucion is not None:
             self.ejecucion.cancelar()
-        self.progreso.set_text("Cancelando: deteniendo fio y borrando el archivo de prueba…")
+        self.etiqueta_paso.set_text("Cancelando: deteniendo fio y borrando el archivo de prueba…")
         self._actualizar_boton()
 
     def detener_y_esperar(self, segundos=60):

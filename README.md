@@ -35,8 +35,8 @@ Para las pruebas: `python3-pytest python3-pyflakes`.
 sudo sh tools/instalar-helper-dev.sh     # una vez: ayudante de root + política polkit
 python3 -m latido                        # abrir la app
 python3 -m latido --desde-fixture tests/fixtures/smartctl/nvme_real.json   # sin root
-python3 -m latido --demo sano         # datos de ejemplo: sano, precaucion, peligro o sin-datos
-python3 tools/capturas.py               # capturas PNG del modo demo (fuera de la CI)
+python3 -m latido --demo sano            # datos de ejemplo: sano, precaucion, peligro o sin-datos
+python3 tools/capturas.py                # capturas PNG del modo demo (fuera de la CI)
 python3 -m pytest                        # pruebas
 ```
 

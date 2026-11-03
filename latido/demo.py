@@ -84,9 +84,10 @@ def velocidad_demo():
         for direccion, mb_s in zip(Direccion, _VELOCIDADES[prueba.clave]):
             for pasada, factor in enumerate((0.98, 1.0, 1.02), start=1):
                 bytes_por_segundo = mb_s * 1_000_000 * factor
+                iops = bytes_por_segundo / prueba.bloque
                 resultado.agregar(Paso(prueba, direccion, pasada), Medicion(
-                    bytes_por_segundo=bytes_por_segundo, iops=bytes_por_segundo / prueba.bloque,
-                    bytes_totales=configuracion.tamano, milisegundos=1_000,
+                    bytes_por_segundo=bytes_por_segundo, iops=iops, bytes_totales=configuracion.tamano,
+                    milisegundos=1_000, latencia_ns=prueba.cola / iops * 1e9,  # ley de Little, cola llena
                 ))
     return VelocidadMedida(resultado, configuracion, "ext4 (ejemplo)")
 

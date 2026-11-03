@@ -66,6 +66,8 @@ class VentanaPrincipal(Adw.ApplicationWindow):
         self.angosto = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(f"max-width: {ANCHO_ANGOSTO}"))
         self.angosto.add_setter(self.cambiador, "visible", False)
         self.angosto.add_setter(self.barra_inferior, "reveal", True)
+        for widget, propiedad, valor in self.pagina_velocidad.ajustes_angosto():
+            self.angosto.add_setter(widget, propiedad, valor)
         self.add_breakpoint(self.angosto)
 
         for nombre, funcion in (("actualizar", self.actualizar), ("exportar", self.exportar),

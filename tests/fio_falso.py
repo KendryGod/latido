@@ -64,7 +64,8 @@ def salida_ok(op, previas):
     repeticion = sum(1 for p in previas if p.get("nombre") == nombre)
     bw = BASE * (repeticion + 1)
     bloque = int(op["bs"])
-    seccion = {"io_bytes": int(op["size"]), "bw_bytes": bw, "iops": bw / bloque, "runtime": 1000}
+    seccion = {"io_bytes": int(op["size"]), "bw_bytes": bw, "iops": bw / bloque, "runtime": 1000,
+               "lat_ns": {"mean": 1_000_000.0 * (repeticion + 1)}}
     vacia = {"io_bytes": 0, "bw_bytes": 0, "iops": 0.0, "runtime": 0}
     escribe = op["rw"] in ("write", "randwrite")
     return {

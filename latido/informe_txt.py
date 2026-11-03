@@ -138,7 +138,8 @@ def _seccion_velocidad(velocidad):
     lineas += _envolver(
         f"Archivo de prueba de {formato_velocidad.tamano(configuracion.tamano)}, {configuracion.pasadas} "
         f"pasada{'s' if configuracion.pasadas != 1 else ''}, sistema de archivos {sistema}. "
-        "MB/s = 1,000,000 bytes por segundo; el número es el promedio de las pasadas."
+        "MB/s = 1,000,000 bytes por segundo; el número es el promedio de las pasadas. "
+        "Latencia: tiempo medio de cada operación."
     )
     for prueba in PRUEBAS:
         lineas.append(f"  {prueba.nombre}")
@@ -149,6 +150,8 @@ def _seccion_velocidad(velocidad):
             else:
                 texto = (f"{formato_velocidad.mb_s(resumen.promedio)} MB/s · "
                          f"{formato_velocidad.iops(resumen.iops_promedio)} IOPS")
+                if resumen.latencia_promedio is not None:
+                    texto += f" · latencia {formato_velocidad.latencia(resumen.latencia_promedio)}"
             lineas += _envolver(f"{direccion.texto.capitalize()}: {texto}", "    ", "      ")
     return lineas
 

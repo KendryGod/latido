@@ -79,7 +79,8 @@ def test_la_demo_funciona_sin_ejecutar_nada(gtk, sin_subprocesos, estado):
     velocidad = ventana.pagina_velocidad
     assert velocidad.vistas.get_visible_child_name() == "prueba"
     assert not velocidad.boton.get_sensitive() and not velocidad.boton_carpeta.get_sensitive()
-    assert velocidad.cuadros["seq1m-q8t1"].columnas[next(iter(velocidad.cuadros["seq1m-q8t1"].columnas))].valor.get_text() != "—"
+    celda = velocidad.cuadros["seq1m-q8t1"].columnas[next(iter(velocidad.cuadros["seq1m-q8t1"].columnas))]
+    assert celda.valor.get_text() != "—" and celda.latencia.get_text() != "—"
     texto = ventana.texto_del_informe()
     assert texto.splitlines()[1] == MARCA_DEMO and "ext4 (ejemplo)" in texto
     assert sin_subprocesos == []  # ni pkexec, ni smartctl, ni fio, ni nada

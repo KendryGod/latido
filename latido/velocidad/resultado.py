@@ -7,6 +7,11 @@ bw_bytes = io_bytes * 1000 / runtime. Si falta bw_bytes, no se calcula otro
 valor: se informa el error.
 
 MB/s = 1 000 000 bytes por segundo.
+
+Latencia: lat_ns.mean, la latencia total media («lat» en HOWTO.rst: desde que fio crea la operación hasta que
+termina). La documentación no dice la unidad en el JSON; el sufijo _ns y la ley de Little con las salidas reales
+(tests/test_velocidad_fio.py) confirman nanosegundos. Es secundaria: si falta o no es válida queda en None y la
+medición vale igual.
 """
 
 import json
@@ -30,6 +35,7 @@ class Medicion:
     iops: float
     bytes_totales: int
     milisegundos: int
+    latencia_ns: float | None = None  # media; None si fio no la dio
 
     @property
     def mb_por_segundo(self):
@@ -53,6 +59,14 @@ def _numero(seccion, clave, nombre_seccion):
     if isinstance(valor, bool) or not isinstance(valor, (int, float)) or not math.isfinite(valor) or valor < 0:
         raise ErrorFio(f"La salida de fio no trae un valor válido de «{clave}» en «{nombre_seccion}».")
     return valor
+
+
+def _latencia(seccion):
+    lat = seccion.get("lat_ns")
+    media = lat.get("mean") if isinstance(lat, dict) else None
+    if isinstance(media, bool) or not isinstance(media, (int, float)) or not math.isfinite(media) or media < 0:
+        return None
+    return float(media)
 
 
 def leer_salida_fio(salida, codigo, error, trabajo, direccion):
@@ -88,6 +102,7 @@ def leer_salida_fio(salida, codigo, error, trabajo, direccion):
         iops=float(_numero(seccion, "iops", direccion.value)),
         bytes_totales=int(_numero(seccion, "io_bytes", direccion.value)),
         milisegundos=int(_numero(seccion, "runtime", direccion.value)),
+        latencia_ns=_latencia(seccion),
     )
     if medicion.bytes_totales == 0:
         raise ErrorFio(f"fio no completó ninguna operación de {direccion.texto} en «{trabajo}».")
@@ -103,6 +118,7 @@ class Resumen:
     iops_promedio: float
     iops_mejor: float
     iops_peor: float
+    latencia_promedio: float | None = None  # nanosegundos; solo si todas las pasadas la tienen
 
 
 def resumir(mediciones):
@@ -111,6 +127,7 @@ def resumir(mediciones):
         return None
     velocidades = [m.bytes_por_segundo for m in mediciones]
     iops = [m.iops for m in mediciones]
+    latencias = [m.latencia_ns for m in mediciones]
     return Resumen(
         pasadas=len(mediciones),
         promedio=sum(velocidades) / len(velocidades),
@@ -119,6 +136,7 @@ def resumir(mediciones):
         iops_promedio=sum(iops) / len(iops),
         iops_mejor=max(iops),
         iops_peor=min(iops),
+        latencia_promedio=None if None in latencias else sum(latencias) / len(latencias),
     )
 
 

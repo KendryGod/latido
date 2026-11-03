@@ -40,8 +40,10 @@ cambia el color de salud.
   - la autenticidad;
   - seis cifras clave, cada una con su unidad y su estado;
   - «Todos los datos», plegado.
-- **Velocidad:** la configuración, un único botón primario (Iniciar/Cancelar), el progreso «Paso n de N» y la
-  cuadrícula de resultados (prueba × lectura/escritura).
+- **Velocidad:** la configuración, un único botón primario (Iniciar/Cancelar), el progreso «Paso n de 8»
+  con `Gtk.ProgressBar`, el mensaje del final (con la limpieza) y la rejilla de resultados: una fila por
+  prueba, Lectura | Escritura, MB/s grande (`.numeric`), barra relativa (`Gtk.LevelBar` sin umbrales de
+  color), IOPS y latencia debajo.
 - **Vacíos y errores:** `Adw.StatusPage` con «Reintentar».
 - **Confirmaciones:** `Adw.AlertDialog`. Restos de una prueba anterior: `Adw.Banner`. Avisos breves:
   `Adw.Toast`.

@@ -97,15 +97,16 @@ TODOS LOS DATOS
 VELOCIDAD
   Archivo de prueba de 256 MiB, 1 pasada, sistema de archivos btrfs. MB/s =
   1,000,000 bytes por segundo; el número es el promedio de las pasadas.
+  Latencia: tiempo medio de cada operación.
   SEQ1M Q8T1
-    Lectura: 1,369.57 MB/s · 1,306 IOPS
-    Escritura: 383.48 MB/s · 366 IOPS
+    Lectura: 1,369.57 MB/s · 1,306 IOPS · latencia 4.05 ms
+    Escritura: 383.48 MB/s · 366 IOPS · latencia 20.76 ms
   SEQ1M Q1T1
-    Lectura: 1,369.57 MB/s · 1,306 IOPS
-    Escritura: 771.37 MB/s · 736 IOPS
+    Lectura: 1,369.57 MB/s · 1,306 IOPS · latencia 748.5 µs
+    Escritura: 771.37 MB/s · 736 IOPS · latencia 1.33 ms
   RND4K Q32T1
-    Lectura: 568.72 MB/s · 138,847 IOPS
-    Escritura: 84.10 MB/s · 20,531 IOPS
+    Lectura: 568.72 MB/s · 138,847 IOPS · latencia 221.8 µs
+    Escritura: 84.10 MB/s · 20,531 IOPS · latencia 1.55 ms
   RND4K Q1T1
-    Lectura: 54.83 MB/s · 13,386 IOPS
-    Escritura: 78.77 MB/s · 19,230 IOPS
+    Lectura: 54.83 MB/s · 13,386 IOPS · latencia 73.6 µs
+    Escritura: 78.77 MB/s · 19,230 IOPS · latencia 50.6 µs

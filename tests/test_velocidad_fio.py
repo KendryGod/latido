@@ -11,6 +11,7 @@ import pytest
 
 from conftest import FIXTURES_FIO
 from latido.velocidad.herramientas import ENTORNO, comprobar_fio
+from latido.velocidad import formato
 from latido.velocidad.pruebas import FIO, PRUEBAS, Direccion, Paso
 from latido.velocidad.resultado import ErrorFio, Medicion, leer_salida_fio, resumir
 
@@ -32,6 +33,19 @@ REALES = {
     "latido-rnd4k-q1t1-escritura": (Direccion.ESCRITURA, 67108864, 852, 78766272, 19230.046948),
 }
 
+# trabajo: lat_ns.mean, la latencia total media en nanosegundos (HOWTO.rst, «lat»)
+LATENCIAS = {
+    "latido-preparar": 6101820.875,
+    "latido-seq1m-q8t1-lectura": 4052370.453125,
+    "latido-seq1m-q8t1-escritura": 20760760.21875,
+    "latido-seq1m-q1t1-lectura": 748536.71875,
+    "latido-seq1m-q1t1-escritura": 1331276.625,
+    "latido-rnd4k-q32t1-lectura": 221787.221802,
+    "latido-rnd4k-q32t1-escritura": 1547253.463379,
+    "latido-rnd4k-q1t1-lectura": 73641.813232,
+    "latido-rnd4k-q1t1-escritura": 50570.604614,
+}
+
 
 def test_hay_un_fixture_real_por_trabajo():
     trabajos = {Paso().trabajo} | {Paso(p, d, 1).trabajo for p in PRUEBAS for d in Direccion}
@@ -44,7 +58,34 @@ def test_hay_un_fixture_real_por_trabajo():
 def test_analiza_las_salidas_reales(trabajo):
     direccion, io_bytes, runtime, bw_bytes, iops = REALES[trabajo]
     medicion = leer_salida_fio(_leer(f"{trabajo}.json"), 0, b"", trabajo, direccion)
-    assert medicion == Medicion(float(bw_bytes), pytest.approx(iops), io_bytes, runtime)
+    assert medicion == Medicion(float(bw_bytes), pytest.approx(iops), io_bytes, runtime, LATENCIAS[trabajo])
+
+
+@pytest.mark.parametrize("trabajo", sorted(REALES))
+def test_lat_ns_son_nanosegundos_en_las_salidas_reales(trabajo):
+    """La documentación de fio 3.40 no dice la unidad de lat_ns en el JSON. Ley de Little: con cola C y λ
+    operaciones por segundo, la latencia media no pasa de C / λ (en vuelo hay C como mucho). Con datos reales
+    queda entre la mitad y el total de C / λ; en microsegundos o milisegundos estaría mil veces lejos."""
+    direccion, _, _, _, iops = REALES[trabajo]
+    paso = next((Paso(p, direccion, 1) for p in PRUEBAS if Paso(p, direccion, 1).trabajo == trabajo), None)
+    cola = paso.prueba.cola if paso else 8  # la preparación usa cola 8 (COLA_PREPARACION)
+    tope_ns = cola / iops * 1e9
+    assert 0.5 * tope_ns <= LATENCIAS[trabajo] <= tope_ns
+
+
+@pytest.mark.parametrize("cambio", [
+    lambda s: s.pop("lat_ns"),
+    lambda s: s.__setitem__("lat_ns", {"min": 1}),
+    lambda s: s.__setitem__("lat_ns", {"mean": -1}),
+    lambda s: s.__setitem__("lat_ns", {"mean": "73"}),
+    lambda s: s.__setitem__("lat_ns", {"mean": float("nan")}),
+    lambda s: s.__setitem__("lat_ns", 5),
+])
+def test_sin_latencia_valida_la_medicion_sigue_y_la_latencia_queda_sin_dato(cambio):
+    """La latencia es secundaria: si falta o no es válida, se muestra «—» y la medición vale igual."""
+    salida = _real_modificado(lambda d: cambio(d["jobs"][0]["read"]))
+    medicion = leer_salida_fio(salida, 0, b"", "latido-seq1m-q8t1-lectura", Direccion.LECTURA)
+    assert medicion.latencia_ns is None and medicion.bytes_por_segundo == 1369568653.0
 
 
 @pytest.mark.parametrize("trabajo", sorted(REALES))
@@ -145,7 +186,19 @@ def test_promedio_mejor_y_peor():
     assert (resumen.promedio, resumen.mejor, resumen.peor) == (200e6, 300e6, 100e6)
     assert (resumen.iops_promedio, resumen.iops_mejor, resumen.iops_peor) == (200.0, 300.0, 100.0)
     assert resumen.pasadas == 3
+    assert resumen.latencia_promedio is None  # sin latencia en las pasadas
     assert resumir([]) is None
+
+
+def test_latencia_promedio_solo_con_todas_las_pasadas():
+    con = [Medicion(1e6, 1.0, 1, 1, 1000.0), Medicion(1e6, 1.0, 1, 1, 3000.0)]
+    assert resumir(con).latencia_promedio == 2000.0
+    assert resumir(con + [Medicion(1e6, 1.0, 1, 1)]).latencia_promedio is None  # no se promedia a medias
+
+
+def test_formato_de_latencia():
+    assert [formato.latencia(n) for n in (73641.813232, 999_949.0, 999_960.0, 1_331_276.625, 20_760_760.2, None)] == [
+        "73.6 µs", "999.9 µs", "1.00 ms", "1.33 ms", "20.76 ms", "—"]  # nunca «1,000.0 µs»
 
 
 def test_mb_por_segundo_es_un_millon_de_bytes():

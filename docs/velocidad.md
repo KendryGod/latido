@@ -23,6 +23,15 @@ Cada prueba mide lectura y escritura, y cada medición se repite tantas
   segundo.
 - El número grande es el **promedio** de las pasadas; debajo van la **mejor** y
   la **peor**.
+- **Latencia**: `lat_ns.mean` del JSON de fio, la latencia total media. HOWTO.rst
+  («lat»): "the time from when fio created the I/O unit to completion of the
+  I/O operation". La documentación no dice la unidad en el JSON; el sufijo `_ns`
+  y la ley de Little con las salidas reales lo confirman: con cola C y λ IOPS,
+  la latencia media queda entre la mitad de C / λ y C / λ en las nueve salidas
+  (prueba `test_lat_ns_son_nanosegundos_en_las_salidas_reales`). Es un dato
+  secundario: si falta o no es válido, se muestra «—» y la medición vale igual.
+- La barra de cada resultado compara con el **más alto de la tabla** (escala
+  lineal). No es un estado: no lleva colores de advertencia ni de éxito.
 - Latido usa `bw_bytes` del JSON de fio (bytes por segundo). Los fixtures
   reales (`tests/fixtures/fio/`) confirman que
   `bw_bytes = io_bytes × 1000 / runtime` (runtime en ms) y que `bw` va en
@@ -49,6 +58,11 @@ Cada prueba mide lectura y escritura, y cada medición se repite tantas
 
 Hay **una invocación de fio por paso** (1 + 4 × 2 × pasadas): así el progreso
 avanza paso a paso y cancelar detiene solo el fio en curso.
+
+En pantalla, el progreso dice «Paso n de 8»: las 8 mediciones son las 4 pruebas
+en lectura y en escritura, y cada una lleva su pasada («pasada 2 de 3»). La
+preparación va aparte («Preparando el archivo de prueba (escribe 1 GiB)»). La
+barra avanza con todos los pasos, la preparación incluida.
 
 ### Qué hace fio si el archivo no existe (HOWTO.rst, fio 3.40)
 
