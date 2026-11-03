@@ -140,15 +140,26 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   su lugar hay otra cosa o alguien le hizo un enlace duro.
 - Por qué abierto: un sistema de archivos puede darle a un archivo nuevo el
   número de inodo de uno recién borrado. En la CI (run 41575524354) pasó así;
-  en tmpfs y btrfs no pasó en 200 intentos. Mientras Latido tenga el archivo
-  abierto, el archivo sigue existiendo aunque lo borren (man 2 unlink) y su
-  número no puede ser el de otro archivo del mismo sistema de archivos
-  (man 7 inode), así que un reemplazo siempre se nota.
+  en tmpfs y btrfs no pasó en 200 intentos. Por eso el número no es lo que
+  detecta un borrado o un reemplazo: lo detecta `st_nlink` = 0 en el
+  descriptor abierto. Mientras Latido tenga el archivo abierto, el archivo
+  sigue existiendo aunque lo borren o pongan otro en su lugar (man 2 unlink),
+  pero sin ningún nombre, y `os.fstat` lo dice.
+- Comparar dispositivo e inodo sirve para lo demás, por ejemplo si lo movieron
+  y pusieron otro archivo en su lugar: dentro de un mismo sistema de archivos,
+  dos archivos que existen a la vez no comparten número (man 7 inode).
+- Todo esto se afirma solo para sistemas de archivos locales. **overlayfs, NFS
+  y FUSE no están probados**: no se sabe si ahí `st_nlink` y los números de
+  inodo se comportan así.
 - Durante la preparación el archivo todavía no está abierto: lo está creando
-  fio. Si la prueba se cancela o falla en ese paso, la limpieza borra el
-  archivo normal con un solo nombre que haya en su ruta, porque solo puede ser
-  el que fio estaba creando (el directorio es 0700: solo tu usuario o root
-  pueden poner otra cosa ahí).
+  fio, y Latido no puede comparar su identidad. Si la preparación no termina
+  bien (se cancela, fio falla o deja algo que no sirve), la limpieza borra lo
+  que haya en la ruta solo si es un archivo normal con un solo nombre. Un
+  enlace simbólico (que no se sigue) o una carpeta no se borran, y se avisa.
+  Modelo de amenaza: el directorio lo creó Latido con modo 0700, estaba vacío
+  al crearse y antes de lanzar fio se comprobó que ese nombre no existía; en
+  un sistema de archivos local, solo tu usuario o root pueden alterar lo que
+  hay dentro.
 - Carpetas rechazadas: que no existen, que no son carpetas, sin permiso de
   escritura, montadas solo para lectura, en un sistema de archivos virtual del
   kernel, o cuya ruta real queda dentro de `/dev`, `/proc` o `/sys`. También
@@ -159,8 +170,9 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
 - Al terminar, fallar, cancelar, cerrar la ventana o salir de la aplicación:
   Latido detiene el grupo de procesos de fio (SIGTERM, 10 s de espera, SIGKILL),
   borra **solo** `latido-velocidad.dat` por su nombre exacto (y solo si sigue
-  siendo el archivo que tiene abierto y tiene un solo nombre), luego el
-  directorio con `rmdir`, y cierra todos sus descriptores. Nunca `rm -r` ni
+  siendo el archivo que tiene abierto y tiene un solo nombre; durante la
+  preparación, con la excepción de arriba), luego el directorio con `rmdir`, y
+  cierra todos sus descriptores. Nunca `rm -r` ni
   `shutil.rmtree`. Si en el directorio aparece algo que Latido no creó, o si su
   archivo tiene otro nombre o se movió, no lo borra y lo dice; si otro programa
   ya lo había borrado, también lo dice.

@@ -5,21 +5,33 @@ Regla de oro de esta pestaña:
   dentro de un directorio NUEVO creado con tempfile.mkdtemp (modo 0700).
 - El archivo no existe antes de la preparación: lo crea fio. Latido mantiene
   abiertos el directorio desde que lo crea y el archivo desde que termina la
-  preparación. Mientras los tenga abiertos siguen existiendo aunque alguien los
-  borre (man 2 unlink), y ningún otro archivo de ese sistema de archivos puede
-  tener su número de inodo (man 7 inode). Antes y después de cada paso se
-  compara lo que Latido tiene abierto (os.fstat) con lo que hay en la ruta, sin
-  seguir enlaces simbólicos: mismo dispositivo e inodo, un solo nombre
-  (st_nlink == 1) y el tamaño pedido. Así se detecta un reemplazo aunque el
-  sistema de archivos le dé al archivo nuevo el número del borrado (en la CI,
-  run 41575524354, pasó).
+  preparación. Antes y después de cada paso compara lo que tiene abierto
+  (os.fstat) con lo que hay en la ruta, sin seguir enlaces simbólicos: un solo
+  nombre (st_nlink == 1), mismo dispositivo e inodo y el tamaño pedido.
+- Si borran el archivo o ponen otro en su lugar, el que Latido tiene abierto
+  sigue existiendo, pero sin ningún nombre (man 2 unlink): os.fstat da
+  st_nlink == 0. Eso es lo que detecta el borrado y el reemplazo, sin mirar el
+  número de inodo, que un sistema de archivos puede darle a un archivo nuevo
+  cuando el anterior ya no existe (en la CI, run 41575524354, ocurrió).
+- Comparar dispositivo e inodo sirve para lo demás, por ejemplo si lo movieron
+  y pusieron otro en su lugar: dentro de un sistema de archivos, dos archivos
+  que existen a la vez no comparten número (man 7 inode).
+- Todo esto se afirma solo para sistemas de archivos locales. overlayfs, NFS y
+  FUSE no están probados: no se sabe si ahí st_nlink y los números de inodo se
+  comportan así.
 - Al terminar, fallar, cancelar o por una excepción: se detiene el grupo de
   procesos de fio; se borra el archivo de prueba por su nombre exacto solo si
-  sigue siendo el que Latido tiene abierto y tiene un solo nombre (si la
-  preparación no llegó a terminar, el archivo normal con un solo nombre que
-  haya en su ruta, que solo puede ser el que fio estaba creando); luego el
+  sigue siendo el que Latido tiene abierto y tiene un solo nombre; luego el
   directorio con rmdir, y se cierran todos los descriptores. Nunca rm -r ni
   shutil.rmtree.
+- Excepción: si la preparación no terminó bien (se canceló, fio falló o dejó
+  algo que no sirve), Latido todavía no tiene el archivo abierto y no puede
+  comparar su identidad. Entonces borra lo que haya en la ruta solo si fio
+  llegó a lanzarse y es un archivo normal con un solo nombre; un enlace
+  simbólico o una carpeta no se borran. Modelo de amenaza: el directorio lo
+  creó Latido con modo 0700, estaba vacío al crearse y antes de lanzar fio se
+  comprobó que ese nombre no existía; en un sistema de archivos local, solo el
+  mismo usuario o root pueden alterar lo que hay dentro.
 - Una sola prueba a la vez. fio corre como el usuario, con lista de
   argumentos, ruta absoluta y entorno limpio; nunca a través de un shell.
 """
