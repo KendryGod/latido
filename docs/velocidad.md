@@ -139,12 +139,12 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   Si algo no cuadra, se detiene y dice qué pasó: lo borraron, lo movieron, en
   su lugar hay otra cosa o alguien le hizo un enlace duro.
 - Por qué abierto: un sistema de archivos puede darle a un archivo nuevo el
-  número de inodo de uno recién borrado. En la CI (run 41575524354) pasó así;
-  en tmpfs y btrfs no pasó en 200 intentos. Por eso el número no es lo que
-  detecta un borrado o un reemplazo: lo detecta `st_nlink` = 0 en el
-  descriptor abierto. Mientras Latido tenga el archivo abierto, el archivo
-  sigue existiendo aunque lo borren o pongan otro en su lugar (man 2 unlink),
-  pero sin ningún nombre, y `os.fstat` lo dice.
+  número de inodo de uno recién borrado. Se deduce del log de la CI (run
+  41575524354) que ocurrió; en tmpfs y btrfs no pasó en 200 intentos. Por eso
+  el número no es lo que detecta un borrado o un reemplazo: lo detecta
+  `st_nlink` = 0 en el descriptor abierto. Mientras Latido tenga el archivo
+  abierto, el archivo sigue existiendo aunque lo borren o pongan otro en su
+  lugar (man 2 unlink), pero sin ningún nombre, y `os.fstat` lo dice.
 - Comparar dispositivo e inodo sirve para lo demás, por ejemplo si lo movieron
   y pusieron otro archivo en su lugar: dentro de un mismo sistema de archivos,
   dos archivos que existen a la vez no comparten número (man 7 inode).

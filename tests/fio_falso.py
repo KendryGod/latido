@@ -16,8 +16,9 @@ sin_trabajos, ensucia, y estos, que cambian el archivo de prueba (después de
 crearlo, si hacía falta):
   reemplaza    lo borra y crea otro con el mismo nombre y tamaño. Según el
                sistema de archivos, el nuevo puede recibir el mismo número de
-               inodo que el borrado: tmpfs y btrfs no lo repiten, pero en la
-               CI (run 41575524354) se repitió.
+               inodo que el borrado: en tmpfs y btrfs no se repitió en 200
+               intentos, y se deduce del log de la CI (run 41575524354) que
+               ocurrió.
   enlaza       lo borra y pone en su lugar un enlace simbólico a "enlace"
   carpeta      lo borra y pone en su lugar una carpeta vacía
   borra        lo borra sin poner nada en su lugar

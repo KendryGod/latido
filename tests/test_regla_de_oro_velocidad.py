@@ -309,13 +309,14 @@ def test_enlace_simbolico_puesto_entre_pasos_no_se_sigue(tmp_path, fio_falso):
 
 
 def test_reemplazo_detectado_aunque_el_sistema_repita_el_numero_de_inodo(tmp_path, fio_falso, reutilizar_inodos):
-    """Lo que pasó en la CI (run 41575524354): el archivo nuevo puede recibir el número del borrado.
+    """El caso de la CI (run 41575524354): el archivo nuevo recibe el número del borrado. Se deduce del
+    log de la CI que ocurrió.
 
-    El simulador le da al archivo nuevo el número del borrado si este ya no existe.
-    Latido mantiene abierto el original, así que su número no se puede repetir
-    (man 2 unlink, man 7 inode) y el reemplazo se detecta en cualquier sistema de
-    archivos. Si Latido no lo mantuviera abierto, esta prueba fallaría en todas
-    partes, como falló la CI.
+    El simulador le da al archivo nuevo el número del borrado si este ya no existe. Lo que detecta el
+    reemplazo es st_nlink == 0 en el descriptor que Latido mantiene abierto, sin mirar números de inodo.
+    Mientras ese descriptor siga abierto, el simulador no repite su número, como un sistema de archivos
+    local según man 7 inode (solo se afirma para esos). Si Latido no lo mantuviera abierto, esta prueba
+    fallaría con el simulador en cualquier máquina, como falló la CI.
     """
     carpeta = tmp_path / "medir"
     carpeta.mkdir()

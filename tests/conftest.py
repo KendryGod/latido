@@ -187,12 +187,13 @@ STAT_REAL, LSTAT_REAL, FSTAT_REAL = os.stat, os.lstat, os.fstat
 
 class SimuladorInodos:
     """Imita un sistema de archivos que da a un archivo nuevo el número de inodo
-    de uno que ya no existe. Así falló la CI (run 41575524354); tmpfs y btrfs no
-    repiten números, por eso en esta máquina la prueba pasaba.
+    de uno que ya no existe. Se deduce del log de la CI (run 41575524354) que
+    ocurrió. En tmpfs y btrfs no se repitió en 200 intentos; en tmpfs, la prueba
+    de la CI pasaba en local.
 
     Solo cambia lo que ven os.stat, os.lstat y os.fstat de ESTE proceso, y solo
-    para archivos normales con los nombres indicados. Regla, según man 2 unlink
-    y man 7 inode: cuando aparece un archivo nuevo con el mismo nombre en la
+    para archivos normales con los nombres indicados. Regla, la de un sistema de
+    archivos local según man 2 unlink y man 7 inode: cuando aparece un archivo nuevo con el mismo nombre en la
     misma carpeta, recibe el número del anterior solo si el anterior ya no
     existe: sin nombre en esa carpeta y sin ningún descriptor de este proceso
     abierto hacia él. No mira descriptores de otros procesos ni nombres en otras

@@ -1,9 +1,11 @@
 """El simulador de reutilización de números de inodo (fixture reutilizar_inodos de conftest.py).
 
-Estas pruebas no dependen del sistema de archivos real: cuando necesitan que
-los números reales sean distintos, crean el archivo nuevo mientras el anterior
-todavía existe (dos archivos que existen a la vez nunca comparten número en un
-mismo sistema de archivos, man 7 inode).
+Estas pruebas no dependen de que el sistema de archivos repita números: cuando
+necesitan que los números reales sean distintos, crean el archivo nuevo
+mientras el anterior todavía existe. Que dos archivos que existen a la vez no
+compartan número dentro de un mismo sistema de archivos (man 7 inode) se
+afirma solo para sistemas de archivos locales; overlayfs, NFS y FUSE no están
+probados.
 """
 
 import os

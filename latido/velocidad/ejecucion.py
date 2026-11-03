@@ -12,7 +12,8 @@ Regla de oro de esta pestaña:
   sigue existiendo, pero sin ningún nombre (man 2 unlink): os.fstat da
   st_nlink == 0. Eso es lo que detecta el borrado y el reemplazo, sin mirar el
   número de inodo, que un sistema de archivos puede darle a un archivo nuevo
-  cuando el anterior ya no existe (en la CI, run 41575524354, ocurrió).
+  cuando el anterior ya no existe (se deduce del log de la CI, run
+  41575524354, que ocurrió).
 - Comparar dispositivo e inodo sirve para lo demás, por ejemplo si lo movieron
   y pusieron otro en su lugar: dentro de un sistema de archivos, dos archivos
   que existen a la vez no comparten número (man 7 inode).
@@ -331,7 +332,9 @@ class Ejecucion:
             raise ErrorVelocidad(f"{CAMBIO}: {motivo}. Latido se detuvo por seguridad.")
 
     def _verificar_carpeta(self):
-        # Está abierta desde que se creó (_fd_directorio): su número no puede pasar a otra carpeta.
+        # Se compara con la identidad que se guardó al crearla (_fd_directorio sigue abierto). Que otra carpeta
+        # no pueda tener ese número de inodo mientras la de Latido exista (man 7 inode) se afirma solo para
+        # sistemas de archivos locales; overlayfs, NFS y FUSE no están probados.
         try:
             info = os.lstat(self.directorio)
         except OSError:
@@ -476,7 +479,10 @@ class Ejecucion:
         elif en_ruta is None:
             return
         elif not stat.S_ISREG(en_ruta.st_mode) or not self._fio_pudo_crear_archivo:
-            # Sin descriptor, la preparación no terminó: un archivo normal solo puede ser el que fio estaba creando.
+            # Sin descriptor (la preparación no terminó) no se puede comparar identidad. Solo se borra un archivo
+            # normal con un solo nombre, y solo si fio llegó a lanzarse, por el modelo de amenaza del docstring
+            # del módulo (carpeta 0700 creada por Latido, vacía y sin ese nombre antes de fio). Aquí no se
+            # cumple: no se borra.
             limpieza.problemas.append(ajeno)
             return
         if en_ruta.st_nlink != 1:
