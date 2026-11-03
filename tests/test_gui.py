@@ -455,3 +455,27 @@ def test_la_vista_pinta_la_tabla_ata(gtk):
     ]
     assert not pagina.grid_cifras.get_visible()  # las seis cifras son de NVMe
 
+
+
+# --- B4: veredicto honesto ---
+
+
+def test_por_que_dice_la_fuente_o_que_es_criterio_de_latido(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_malo.json"))
+    assert pagina._filas_motivos[0].get_subtitle() == "Fuente: NVMe Base Specification 2.0c, figura 207, byte 00, bit 2"
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_precaucion.json"))
+    assert "Criterio de Latido (sin fuente)" in [f.get_subtitle() for f in pagina._filas_motivos]
+
+
+def test_autenticidad_aparte_del_color_de_salud(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"), _disco(tamano=1000204886016))
+    assert pagina.grupo_autenticidad.get_visible()
+    assert pagina.fila_autenticidad.get_title() == "No concluyente"
+    assert "Latido aún no verifica la capacidad real." in pagina.fila_autenticidad.get_subtitle()
+    assert pagina.icono_autenticidad.get_icon_name() == "dialog-question-symbolic"
+    assert not set(pagina.fila_autenticidad.get_css_classes()) & CLASES_DE_ESTADO
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"), _disco(tamano=2 * 10**12))
+    assert pagina.fila_autenticidad.get_title() == "Falso o manipulado"
+    assert pagina.etiqueta_estado.get_text() == "Bueno"  # el color de salud no cambia

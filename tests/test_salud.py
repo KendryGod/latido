@@ -155,10 +155,19 @@ def test_solo_bit_de_temperatura_es_precaucion(base_sintetica):
     assert analizar(base_sintetica).estado is Estado.PRECAUCION
 
 
-@pytest.mark.parametrize("valor", [0b1, 0b100, 0b1000, 0b1_0000, 0b10_0000, 0b100_0000, 0b110])
+@pytest.mark.parametrize("valor", [0b1, 0b100, 0b1000, 0b1_0000, 0b10_0000, 0b110])
 def test_cualquier_otro_bit_de_critical_warning_es_malo(base_sintetica, valor):
     _log(base_sintetica)["critical_warning"] = valor
     assert analizar(base_sintetica).estado is Estado.MALO
+
+
+@pytest.mark.parametrize("valor", [0b100_0000, 0b1000_0000])
+def test_bits_reservados_de_critical_warning_son_precaucion_sin_fuente(base_sintetica, valor):
+    """La especificación los marca «Reserved»: sin fuente, la regla no puede dar rojo (criterio de Latido)."""
+    _log(base_sintetica)["critical_warning"] = valor
+    informe = analizar(base_sintetica)
+    assert informe.estado is Estado.PRECAUCION
+    assert [d.regla for d in informe.disparos] == ["NVME-AC-RESERVADO"]
 
 
 def test_sin_critical_warning_y_smart_fallido_es_malo(base_sintetica):
@@ -186,8 +195,9 @@ def test_errores_de_medio_es_precaucion(base_sintetica):
     assert analizar(base_sintetica).estado is Estado.PRECAUCION
 
 
-@pytest.mark.parametrize("repuesto, estado", [(10, Estado.PRECAUCION), (9, Estado.PRECAUCION), (11, Estado.BUENO)])
-def test_repuesto_en_o_bajo_umbral(base_sintetica, repuesto, estado):
+@pytest.mark.parametrize("repuesto, estado", [(10, Estado.BUENO), (9, Estado.MALO), (11, Estado.BUENO)])
+def test_repuesto_bajo_umbral_es_malo(base_sintetica, repuesto, estado):
+    """NVMe Base 2.0c, figura 207: el aviso es cuando el repuesto «has fallen below the threshold» (umbral 10)."""
     _log(base_sintetica)["available_spare"] = repuesto
     assert analizar(base_sintetica).estado is estado
 
@@ -315,7 +325,6 @@ def test_critical_comp_time_con_variante_s(base_sintetica):
     {"warning_temp_time": 5000},
     {"unsafe_shutdowns": 10**6},
     {"num_err_log_entries": 4321},
-    {"temperature": 120},
 ])
 def test_datos_que_solo_se_muestran(base_sintetica, cambios):
     _log(base_sintetica).update(cambios)
@@ -325,7 +334,8 @@ def test_datos_que_solo_se_muestran(base_sintetica, cambios):
 
 def test_precaucion_combinada_lista_todos_los_motivos():
     motivos = analizar(cargar("sintetico_precaucion_combinada.json")).motivos
-    assert len(motivos) == 5
+    assert len(motivos) == 4  # el repuesto 10 de 10 no está «por debajo» del umbral
+    assert not any("repuesto" in m for m in motivos)
     assert any("temperatura salió del rango" in m for m in motivos)
     assert any("temperatura crítica" in m for m in motivos)
 

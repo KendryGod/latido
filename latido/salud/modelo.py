@@ -66,6 +66,7 @@ class InformeSalud:
     numero_serie: str | None = field(default=None, repr=False)
     firmware: str | None = None
     capacidad: int | None = None  # bytes
+    namespaces: int | None = None  # nvme_number_of_namespaces (para la autenticidad)
     protocolo: str | None = None
 
     vida_pct: int | None = None  # max(0, 100 - uso_pct)

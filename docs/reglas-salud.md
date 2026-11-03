@@ -1,88 +1,34 @@
 # Reglas de salud de Latido
 
-**Estas reglas son criterio propio de Latido**, no un estándar de la industria
-ni una recomendación del fabricante. SMART mide el **daño acumulado** que el
-disco ha registrado; **no predice fallas**. Un disco en BUENO puede fallar
-mañana, y uno en PRECAUCION puede durar años.
+Las reglas con FUENTE se apoyan en la especificación NVMe o en el manual de
+smartctl; las que no tienen fuente son **criterio de Latido** y nunca dan rojo
+(docs/veredicto.md). SMART mide el **daño acumulado** que el
+disco ha registrado; **no predice fallas**. Un disco en Bueno puede fallar
+mañana, y uno en Precaución puede durar años.
 
-Código: `latido/salud/analisis.py`. Por ahora solo hay reglas para NVMe;
-los discos ATA/SATA/USB llegan en la Fase 2.
+Código: `latido/salud/analisis.py` y `latido/salud/reglas.py`. Por ahora solo hay reglas para NVMe.
+De los discos ATA, Latido lee y muestra la tabla de atributos, pero todavía no la analiza.
 
 ## Los cuatro estados
 
-| Estado      | Color (clase libadwaita) | Qué quiere decir                         |
-|-------------|--------------------------|------------------------------------------|
-| BUENO       | azul (`accent`)          | Ninguna señal de daño en los datos SMART |
-| PRECAUCION  | amarillo (`warning`)     | Hay señales de riesgo                    |
-| MALO        | rojo (`error`)           | El disco reporta fallas: evítalo         |
-| DESCONOCIDO | gris (`dim-label`)       | No hay datos suficientes para opinar     |
+| Estado     | Color (paleta de libadwaita) | Qué quiere decir                          |
+|------------|------------------------------|-------------------------------------------|
+| Bueno      | azul (`@blue_3`)             | Ninguna regla se disparó                  |
+| Precaución | amarillo (`@yellow_5`)       | Hay señales de riesgo                     |
+| Peligro    | rojo (`@red_3`)              | El disco reporta fallas: evítalo          |
+| Sin datos  | gris (`@dark_1`)             | No hay datos suficientes para opinar      |
 
-**Ante la duda, DESCONOCIDO. Nunca BUENO por omisión.**
+**Ante la duda, Sin datos. Nunca Bueno por omisión.**
 
-## 1. Código de salida de smartctl
+## Las reglas
 
-smartctl devuelve una máscara de bits (`man smartctl`, sección EXIT STATUS).
-Latido combina (OR) el `smartctl.exit_status` del JSON y el código del proceso.
+Todas las reglas, con su condición, su resultado y su FUENTE, están en una sola tabla:
+[docs/veredicto.md](veredicto.md) (en el código, `latido/salud/reglas.py`). Una regla sin fuente es
+«criterio de Latido» y nunca da rojo.
 
-| Bit | Significado (man smartctl)                                    | Efecto en Latido |
-|-----|---------------------------------------------------------------|------------------|
-| 0   | La línea de órdenes no se pudo interpretar                     | DESCONOCIDO: no hay datos válidos |
-| 1   | No se pudo abrir el disco / sin IDENTIFY / bajo consumo        | DESCONOCIDO: no hay datos válidos |
-| 2   | Falló alguna orden SMART, o error de suma de verificación      | Los datos pueden estar incompletos: no puede ser BUENO (queda DESCONOCIDO salvo que haya señales de PRECAUCION o MALO) |
-| 3   | El estado SMART dice "DISK FAILING"                            | Ver regla de MALO |
-| 4   | Atributos de prefalla en o bajo su umbral                      | MALO |
-| 5   | Algún atributo estuvo bajo su umbral en el pasado              | PRECAUCION |
-| 6   | El registro de errores del disco tiene entradas                | PRECAUCION |
-| 7   | El registro de autodiagnósticos tiene errores                  | PRECAUCION |
-
-Los bits 3 a 7 no invalidan los datos: alimentan el diagnóstico.
-
-Si algún código no es válido (por ejemplo, smartctl terminó por una señal),
-o no se conoce ninguno, el estado es DESCONOCIDO. Si el JSON de smartctl no es
-válido, también.
-
-## 2. Reglas NVMe
-
-Se aplican solo si los bits 0 y 1 están apagados.
-
-### MALO
-- `critical_warning` tiene activo cualquier bit distinto del bit 1 (temperatura).
-- No existe `critical_warning` y smartctl dice que el disco falla
-  (`smart_status.passed` es `false` o el bit 3 está activo).
-- `critical_warning` es 0 pero smartctl dice que el disco falla: los datos se
-  contradicen y Latido elige el lado prudente.
-- Bit 4 del código de salida.
-
-### PRECAUCION
-- `critical_warning` tiene activo solo el bit 1 (temperatura).
-- `media_errors` > 0.
-- `available_spare` en o por debajo de `available_spare_threshold`.
-- Vida estimada <= 10 %, donde vida = max(0, 100 - `percentage_used`).
-- `critical_comp_time` > 0: minutos que el disco pasó en o por encima de su
-  temperatura crítica (CCTEMP). Unidad verificada en NVM Express Base
-  Specification 2.0c, sección 5.16.1.3, figura 207. Si el disco no define
-  CCTEMP, la especificación dice que este campo siempre vale 0. Si el campo
-  falta, no cambia el estado (no está en la lista de datos obligatorios).
-- Bits 5, 6 o 7 del código de salida.
-
-### Solo se muestran (no cambian el estado)
-- `warning_temp_time`: minutos entre la temperatura de advertencia y la crítica.
-- `unsafe_shutdowns`: apagados inseguros.
-- `num_err_log_entries`: entradas del registro de errores (no todas son daños).
-- La temperatura actual: el estado por temperatura lo deciden el bit 1 de
-  `critical_warning` y `critical_comp_time`.
-
-### DESCONOCIDO
-- Bits 0 o 1, JSON inválido o código de salida inválido.
-- Falta cualquiera de estos datos: `critical_warning`, `media_errors`,
-  `available_spare`, `available_spare_threshold`, `percentage_used`.
-- Bit 2 sin otras señales.
-
-### BUENO
-Solo si no se cumple nada de lo anterior y están todos los datos de la lista.
-
-Si un disco cumple a la vez reglas de varios estados, gana el más grave
-(MALO sobre PRECAUCION sobre DESCONOCIDO) y se muestran todos los motivos.
+El código de salida de smartctl es una máscara de bits (`man smartctl`, sección EXIT STATUS). Latido combina
+(OR) el `smartctl.exit_status` del JSON y el código del proceso. Si algún código no es válido (por ejemplo,
+smartctl terminó por una señal), o no se conoce ninguno, el estado es Sin datos.
 
 ## 3. Cálculos
 

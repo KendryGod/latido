@@ -21,8 +21,6 @@ from latido.salud.salida_smartctl import (
     describir_bit,
 )
 
-UMBRAL_VIDA_PCT = 10  # vida <= 10 % es PRECAUCION (criterio propio)
-
 _DIGITOS = re.compile(r"[0-9]+")
 
 
@@ -74,6 +72,11 @@ def _info(motivo):
 
 def _bien(motivo):
     return Disparo(None, Estado.BUENO, motivo)
+
+
+def _clasificar(disparo, malos, precauciones):
+    """El peor color gana: cada disparo va a su lista según el resultado de su regla."""
+    (malos if disparo.estado is Estado.MALO else precauciones).append(disparo)
 
 
 def _registrar(informe, disparos):
@@ -171,6 +174,7 @@ def _leer_nvme(informe, datos):
     informe.repuesto_pct = leer_entero(registro, "available_spare")
     informe.repuesto_umbral_pct = leer_entero(registro, "available_spare_threshold")
 
+    informe.namespaces = leer_entero(datos, "nvme_number_of_namespaces")
     informe.registro_nvme = construir_registro(registro)
 
 
@@ -236,9 +240,8 @@ def _diagnosticar_nvme(informe, datos, mascara):
     else:
         for bit in bits_activos(advertencia):
             texto = explicaciones.BITS_ADVERTENCIA_CRITICA.get(bit, f"bit reservado {bit} activo")
-            disparo = _disparo(reglas.REGLA_ADVERTENCIA_CRITICA.get(bit, "NVME-AC-RESERVADO"),
-                               f"Advertencia crítica del disco: {texto}.")
-            (precauciones if disparo.estado is Estado.PRECAUCION else malos).append(disparo)
+            _clasificar(_disparo(reglas.REGLA_ADVERTENCIA_CRITICA.get(bit, "NVME-AC-RESERVADO"),
+                                 f"Advertencia crítica del disco: {texto}."), malos, precauciones)
         if advertencia == 0 and smartctl_dice_falla:
             malos.append(_disparo(
                 "NVME-CONTRADICCION",
@@ -266,19 +269,42 @@ def _diagnosticar_nvme(informe, datos, mascara):
 
     if informe.repuesto_pct is None or informe.repuesto_umbral_pct is None:
         faltan.append("repuesto disponible y su umbral")
-    elif informe.repuesto_pct <= informe.repuesto_umbral_pct:
-        precauciones.append(_disparo(
+    elif informe.repuesto_pct < informe.repuesto_umbral_pct:
+        _clasificar(_disparo(
             "NVME-RESERVA",
-            f"El repuesto disponible ({informe.repuesto_pct} %) está en o bajo su umbral "
+            f"El repuesto disponible ({informe.repuesto_pct} %) está por debajo de su umbral "
             f"({informe.repuesto_umbral_pct} %).",
-        ))
+        ), malos, precauciones)
 
-    if informe.vida_pct is None:
+    if informe.uso_pct is None:
         faltan.append("desgaste (percentage_used)")
-    elif informe.vida_pct <= UMBRAL_VIDA_PCT:
-        precauciones.append(_disparo(
+    elif informe.uso_pct >= reglas.UMBRAL_USO_FUENTE:
+        _clasificar(_disparo(
+            "NVME-USO-100",
+            f"El disco estima que ya usó el {informe.uso_pct} % de su vida útil. "
+            "Es una estimación del fabricante, no una falla.",
+        ), malos, precauciones)
+    elif informe.uso_pct >= reglas.UMBRAL_USO_SIN_FUENTE:
+        _clasificar(_disparo(
             "LATIDO-VIDA", f"Queda {informe.vida_pct} % de vida estimada (desgaste: {informe.uso_pct} %)."
-        ))
+        ), malos, precauciones)
+
+    # Temperatura compuesta contra los umbrales que reporta el propio disco (WCTEMP y CCTEMP). Un umbral 0
+    # quiere decir que el disco no lo informa. Si falta, no cambia el estado.
+    temperatura = informe.temperatura
+    if temperatura is not None and informe.temperatura_critica and temperatura >= informe.temperatura_critica:
+        _clasificar(_disparo(
+            "NVME-TEMP-CRITICA",
+            f"La temperatura ({temperatura} °C) llegó al umbral crítico del propio disco "
+            f"({informe.temperatura_critica} °C).",
+        ), malos, precauciones)
+    elif (temperatura is not None and informe.temperatura_advertencia
+          and temperatura >= informe.temperatura_advertencia):
+        _clasificar(_disparo(
+            "NVME-TEMP-ADVERTENCIA",
+            f"La temperatura ({temperatura} °C) llegó al umbral de advertencia del propio disco "
+            f"({informe.temperatura_advertencia} °C).",
+        ), malos, precauciones)
 
     # Unidad: minutos (NVMe Base Specification 2.0c, figura 207). No es un
     # dato obligatorio para BUENO: si falta, no cambia el estado.

@@ -6,7 +6,9 @@ import traceback
 from gi.repository import Adw, GLib, Gtk, Pango
 
 from latido.salud import Estado, InformeSalud, formato
+from latido.salud.autenticidad import FALSO, NO_COMPROBADO, NO_CONCLUYENTE, SIN_SENALES, SOSPECHOSO, evaluar_autenticidad
 from latido.salud.cifras import SIN_VALOR, cifras_clave
+from latido.salud.reglas import POR_ID
 from latido.sistema.lectura import ErrorLectura, TipoError
 
 # Estado: (texto, clase de latido/ui/estilo.py, ícono simbólico, frase).
@@ -30,6 +32,13 @@ APARIENCIA_CIFRA = {
     Estado.MALO: ("Peligro", "latido-malo", "dialog-error-symbolic"),
     None: ("Sin dato", "latido-desconocido", "dialog-question-symbolic"),
     "informativa": ("Informativo", "latido-desconocido", "dialog-information-symbolic"),
+}
+# La autenticidad va aparte del color de salud: ícono + palabra, sin color.
+ICONO_AUTENTICIDAD = {
+    SIN_SENALES: "object-select-symbolic",
+    SOSPECHOSO: "dialog-warning-symbolic",
+    FALSO: "dialog-error-symbolic",
+    NO_CONCLUYENTE: "dialog-question-symbolic",
 }
 # Ícono de cada línea de «Por qué» según el estado que da su regla (None: solo informa).
 ICONO_MOTIVO = {
@@ -129,6 +138,14 @@ def etiquetas_selector(discos):
         f"{corta} · {disco.nombre}" if cortas.count(corta) > 1 else corta
         for corta, disco in zip(cortas, discos)
     ]
+
+
+def texto_fuente(disparo):
+    """Debajo de cada línea de «Por qué»: la fuente de su regla, o que es criterio de Latido."""
+    if disparo.regla is None:
+        return None
+    regla = POR_ID[disparo.regla]
+    return "Criterio de Latido (sin fuente)" if regla.criterio_de_latido else f"Fuente: {regla.fuente}"
 
 
 def _numero(valor):
@@ -249,6 +266,18 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self.grupo_motivos = Adw.PreferencesGroup(title="Por qué")
         self._filas_motivos = []
         caja.append(self.grupo_motivos)
+
+        # Autenticidad: una etiqueta aparte, que nunca cambia el color de salud.
+        self.grupo_autenticidad = Adw.PreferencesGroup(title="Autenticidad")
+        self.fila_autenticidad = Adw.ActionRow(use_markup=False, subtitle_lines=0)
+        self.icono_autenticidad = Gtk.Image()
+        self.fila_autenticidad.add_prefix(self.icono_autenticidad)
+        self.grupo_autenticidad.add(self.fila_autenticidad)
+        self.fila_no_comprobado = Adw.ExpanderRow(title="Qué no se comprobó", use_markup=False)
+        for texto in NO_COMPROBADO:
+            self.fila_no_comprobado.add_row(_fila(texto))
+        self.grupo_autenticidad.add(self.fila_no_comprobado)
+        caja.append(self.grupo_autenticidad)
 
         # Cifras clave: número grande, unidad y estado propio.
         self.grid_cifras = Gtk.FlowBox(
@@ -458,12 +487,13 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self._filas_motivos, self._filas_registro, self._filas_ata = [], [], []
         for valor in self.filas_disco.values():
             valor.set_text("")
-        for grupo in (self.grupo_disco, self.grupo_motivos, self.grupo_registro, self.grupo_ata):
+        for grupo in (self.grupo_disco, self.grupo_motivos, self.grupo_registro, self.grupo_ata,
+                      self.grupo_autenticidad):
             grupo.set_visible(False)
 
     def _agregar_motivos(self, disparos):
         for disparo in disparos:
-            fila = _fila(disparo.motivo)
+            fila = _fila(disparo.motivo, texto_fuente(disparo))
             fila.add_prefix(Gtk.Image(icon_name=ICONO_MOTIVO[disparo.estado]))
             self.grupo_motivos.add(fila)
             self._filas_motivos.append(fila)
@@ -498,6 +528,12 @@ class PaginaSalud(Gtk.ScrolledWindow):
 
         self.etiqueta_disco.set_text(disco.etiqueta if disco else (informe.dispositivo or ""))
         self._agregar_motivos(informe.disparos)
+
+        self.autenticidad = evaluar_autenticidad(informe, disco.tamano if disco else None)
+        self.fila_autenticidad.set_title(self.autenticidad.etiqueta)
+        self.fila_autenticidad.set_subtitle(" ".join(self.autenticidad.porque))
+        self.icono_autenticidad.set_from_icon_name(ICONO_AUTENTICIDAD[self.autenticidad.etiqueta])
+        self.grupo_autenticidad.set_visible(True)
 
         for cifra in cifras_clave(informe):
             self.cifras[cifra.clave].mostrar(cifra)

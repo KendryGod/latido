@@ -36,7 +36,7 @@
   "temperature": {
     "op_limit_max": 80,
     "critical_limit_max": 85,
-    "current": 84
+    "current": 79
   },
   "smart_status": {
     "passed": true,
@@ -47,7 +47,7 @@
   "nvme_smart_health_information_log": {
     "nsid": -1,
     "critical_warning": 0,
-    "temperature": 84,
+    "temperature": 79,
     "available_spare": 100,
     "available_spare_threshold": 10,
     "percentage_used": 3,
