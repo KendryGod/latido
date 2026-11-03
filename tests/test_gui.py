@@ -122,9 +122,11 @@ def test_cifras_clave_y_registro_del_fixture_real(gtk):
     vistas = {clave: (t.titulo.get_text(), t.valor.get_text(), t.unidad.get_text(), t.palabra.get_text(),
                       t.detalle.get_text()) for clave, t in pagina.cifras.items()}
     assert vistas == {
-        "temperatura": ("Temperatura", "46", "°C", "Normal", "Umbrales del disco: advertencia 83 °C · crítica 90 °C"),
-        "vida": ("Vida usada", "1", "%", "Normal", "Estimación del propio disco. Queda 99 %."),
-        "reserva": ("Repuesto disponible", "100", "%", "Normal", "Umbral del disco: 10 %"),
+        # Espacio no separable entre número y unidad: con el tema del usuario, a 720 px «°C» quedaba solo abajo.
+        "temperatura": ("Temperatura", "46", "°C", "Normal",
+                        "Umbrales del disco: advertencia 83\u00a0°C · crítica 90\u00a0°C"),
+        "vida": ("Vida usada", "1", "%", "Normal", "Estimación del propio disco. Queda 99\u00a0%."),
+        "reserva": ("Repuesto disponible", "100", "%", "Normal", "Umbral del disco: 10\u00a0%"),
         "horas": ("Horas encendido", "4,921", "h", "Informativo", "934 ciclos de encendido"),
         "escritos": ("Datos escritos", "13.08", "TB", "Informativo", "Leídos: 16.60 TB"),
         "errores": ("Errores de medio", "0", "", "Normal", "Datos que el disco no pudo corregir"),
