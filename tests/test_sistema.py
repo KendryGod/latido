@@ -259,3 +259,36 @@ def test_argumentos():
     for malos in (["--desde-fixture"], ["--desde-fixture="], ["--otro"]):
         with pytest.raises(ErrorArgumentos):
             interpretar_argumentos(malos)
+
+
+# --- El número de serie nunca aparece en mensajes de error --------------------
+
+SERIE_FALSA = "SINTETICO-0002-ABC"
+
+
+@pytest.mark.parametrize("codigo, stdout", [
+    (3, b'{"serial_number": "SINTETICO-0002-ABC"}'),
+    (1, b"SINTETICO-0002-ABC"),
+    (0, b'{"serial_number": "SINTETICO-0002-ABC"'),  # JSON cortado
+    (0, b'{"datos": {"serial_number": "SINTETICO-0002-ABC"}}'),  # formato inesperado
+])
+def test_serie_no_aparece_en_errores(codigo, stdout):
+    with pytest.raises(ErrorLectura) as error:
+        _leer(PkexecFalso(returncode=codigo, stdout=stdout))
+    assert SERIE_FALSA not in error.value.mensaje
+    assert SERIE_FALSA not in str(error.value)
+
+
+def test_lectura_con_serie_lo_entrega_solo_en_el_informe(nvme_real):
+    nvme_real["serial_number"] = SERIE_FALSA
+    informe = _leer(PkexecFalso(stdout=_respuesta(nvme_real)))
+    assert informe.numero_serie == SERIE_FALSA
+    assert SERIE_FALSA not in repr(informe)
+
+
+def test_etiqueta_de_fixture_sin_ruta_larga():
+    from latido.ui.aplicacion import disco_de_fixture
+
+    disco = disco_de_fixture("/una/ruta/muy/larga/de/prueba/nvme_real.json")
+    assert disco.etiqueta == "Archivo de prueba · nvme_real.json"
+    assert disco.ruta_lectura == "/una/ruta/muy/larga/de/prueba/nvme_real.json"

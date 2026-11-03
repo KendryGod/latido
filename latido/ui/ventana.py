@@ -6,9 +6,14 @@ from latido.ui.estilo import cargar_estilo
 from latido.ui.pagina_salud import PaginaSalud
 
 
+ANCHO, ALTO = 800, 900
+ANCHO_MINIMO, ALTO_MINIMO = 400, 500
+
+
 class VentanaPrincipal(Adw.ApplicationWindow):
     def __init__(self, discos, lector, error_deteccion=None, aviso_desarrollo=None, **kwargs):
-        super().__init__(title="Latido", default_width=760, default_height=880, **kwargs)
+        super().__init__(title="Latido", default_width=ANCHO, default_height=ALTO, **kwargs)
+        self.set_size_request(ANCHO_MINIMO, ALTO_MINIMO)
         cargar_estilo()
 
         self.pila = Adw.ViewStack()

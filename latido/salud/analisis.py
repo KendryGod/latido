@@ -112,6 +112,7 @@ def _leer_datos_generales(informe, datos):
     informe.protocolo = _texto(dispositivo.get("protocol"))
     informe.tipo = {"NVMe": "nvme", "ATA": "ata"}.get(informe.protocolo)
     informe.modelo = _texto(datos.get("model_name"))
+    informe.numero_serie = _texto(datos.get("serial_number"))
     informe.firmware = _texto(datos.get("firmware_version"))
     informe.capacidad = leer_entero(datos.get("user_capacity"), "bytes")
 

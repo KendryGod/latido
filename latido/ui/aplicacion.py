@@ -15,9 +15,9 @@ def disco_de_fixture(ruta):
     nombre = os.path.basename(ruta)
     return Disco(
         nombre=nombre,
-        ruta=ruta,
+        ruta=nombre,  # solo para mostrar: la ruta completa ensancharía el selector
         ruta_lectura=ruta,
-        modelo=f"Archivo de prueba: {nombre}",
+        modelo="Archivo de prueba",
         tamano=None,
         transporte=None,
         es_sistema=False,

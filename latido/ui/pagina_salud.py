@@ -3,7 +3,7 @@
 import threading
 import traceback
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk, Pango
 
 from latido.salud import Estado, formato
 from latido.sistema.lectura import ErrorLectura, TipoError
@@ -26,7 +26,7 @@ FILAS_RESUMEN = [
     ("vida", "Vida restante"),
     ("temperatura", "Temperatura"),
     ("horas", "Horas encendido"),
-    ("ciclos", "Encendidos"),
+    ("ciclos", "Ciclos de encendido"),
     ("tb_escritos", "Datos escritos"),
     ("tb_leidos", "Datos leídos"),
 ]
@@ -53,6 +53,51 @@ def _detalle_temperatura(informe):
     if not umbrales:
         return None
     return "Umbrales del propio disco: " + ", ".join(umbrales)
+
+
+FILAS_DISCO = [
+    ("modelo", "Modelo"),
+    ("serie", "Número de serie"),
+    ("firmware", "Firmware"),
+    ("capacidad", "Capacidad"),
+    ("interfaz", "Interfaz"),
+]
+
+
+def _texto_interfaz(informe, disco):
+    protocolo = informe.protocolo
+    transporte = disco.transporte if disco else None
+    if protocolo and transporte and transporte.lower() != protocolo.lower():
+        return f"{protocolo} (conexión {transporte.upper()})"
+    if protocolo:
+        return protocolo
+    return transporte.upper() if transporte else formato.NO_DISPONIBLE
+
+
+def textos_disco(informe, disco=None):
+    """Datos de identificación del disco. El número de serie solo va a la pantalla."""
+    return {
+        "modelo": informe.modelo or formato.NO_DISPONIBLE,
+        "serie": informe.numero_serie or formato.NO_DISPONIBLE,
+        "firmware": informe.firmware or formato.NO_DISPONIBLE,
+        "capacidad": formato.capacidad(informe.capacidad),
+        "interfaz": _texto_interfaz(informe, disco),
+    }
+
+
+def _fabrica_selector(elipsis):
+    """Etiquetas del selector: con elipsis en el botón para que no ensanche la ventana."""
+    fabrica = Gtk.SignalListItemFactory()
+
+    def preparar(_fabrica, elemento):
+        etiqueta = Gtk.Label(xalign=0)
+        if elipsis:
+            etiqueta.set_ellipsize(Pango.EllipsizeMode.END)
+        elemento.set_child(etiqueta)
+
+    fabrica.connect("setup", preparar)
+    fabrica.connect("bind", lambda _f, elemento: elemento.get_child().set_text(elemento.get_item().get_string()))
+    return fabrica
 
 
 def textos_resumen(informe):
@@ -95,6 +140,8 @@ class PaginaSalud(Gtk.ScrolledWindow):
         # Selector de disco y botón.
         fila_selector = Gtk.Box(spacing=12)
         self.selector = Gtk.DropDown.new_from_strings([d.etiqueta for d in discos])
+        self.selector.set_factory(_fabrica_selector(elipsis=True))
+        self.selector.set_list_factory(_fabrica_selector(elipsis=False))
         self.selector.set_hexpand(True)
         self.selector.connect("notify::selected", self._al_cambiar_disco)
         self.spinner = Adw.Spinner(visible=False)
@@ -130,6 +177,21 @@ class PaginaSalud(Gtk.ScrolledWindow):
             etiqueta.set_margin_end(18)
             panel.append(etiqueta)
         caja.append(panel)
+
+        self.grupo_disco = Adw.PreferencesGroup(title="Disco")
+        self.filas_disco = {}
+        for clave, titulo in FILAS_DISCO:
+            fila = _fila(titulo)
+            valor = Gtk.Label(
+                xalign=1, justify=Gtk.Justification.RIGHT, wrap=True,
+                wrap_mode=Pango.WrapMode.WORD_CHAR, max_width_chars=32,
+            )
+            if clave == "serie":
+                valor.set_selectable(True)
+            fila.add_suffix(valor)
+            self.filas_disco[clave] = valor
+            self.grupo_disco.add(fila)
+        caja.append(self.grupo_disco)
 
         self.grupo_resumen = Adw.PreferencesGroup(title="Resumen")
         self.filas_resumen = {}
@@ -177,6 +239,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self._limpiar()
         self._poner_estado("—", "Elige un disco y pulsa «Leer salud».")
         self.etiqueta_disco.set_text(disco.etiqueta if disco else "")
+        self.selector.set_tooltip_text(disco.etiqueta if disco else None)
         habilitado = disco is not None and disco.habilitado
         self.boton.set_sensitive(habilitado and not self.leyendo)
         self.aviso.set_text(disco.aviso if disco and disco.aviso else "")
@@ -252,7 +315,9 @@ class PaginaSalud(Gtk.ScrolledWindow):
             self.grupo_registro.remove(fila)
         self._filas_motivos = []
         self._filas_registro = []
-        for grupo in (self.grupo_resumen, self.grupo_motivos, self.grupo_registro):
+        for valor in self.filas_disco.values():
+            valor.set_text("")
+        for grupo in (self.grupo_disco, self.grupo_resumen, self.grupo_motivos, self.grupo_registro):
             grupo.set_visible(False)
 
     def _agregar_motivos(self, motivos):
@@ -273,14 +338,16 @@ class PaginaSalud(Gtk.ScrolledWindow):
         texto, _, _, frase = APARIENCIA[informe.estado]
         self._poner_estado(texto, frase, informe.estado)
 
-        descripcion = [informe.modelo or (disco.modelo if disco else None) or "Modelo no disponible"]
-        if informe.capacidad is not None:
-            descripcion.append(formato.capacidad(informe.capacidad))
-        if informe.firmware:
-            descripcion.append(f"firmware {informe.firmware}")
-        if informe.dispositivo:
-            descripcion.append(informe.dispositivo)
-        self.etiqueta_disco.set_text(" · ".join(descripcion))
+        self.etiqueta_disco.set_text(disco.etiqueta if disco else (informe.dispositivo or ""))
+
+        for clave, valor in textos_disco(informe, disco).items():
+            etiqueta = self.filas_disco[clave]
+            etiqueta.set_text(valor)
+            # Solo los textos largos se parten en varias líneas, y con un ancho mínimo.
+            largo = len(valor) > 16
+            etiqueta.set_wrap(largo)
+            etiqueta.set_width_chars(16 if largo else -1)
+        self.grupo_disco.set_visible(True)
 
         for clave, (valor, detalle) in textos_resumen(informe).items():
             fila, etiqueta = self.filas_resumen[clave]

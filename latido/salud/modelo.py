@@ -35,6 +35,9 @@ class InformeSalud:
     tipo: str | None = None  # "nvme" o "ata"
     dispositivo: str | None = None
     modelo: str | None = None
+    # Solo para mostrar en pantalla: repr=False para que nunca acabe en un log
+    # o en un mensaje de error que imprima el informe.
+    numero_serie: str | None = field(default=None, repr=False)
     firmware: str | None = None
     capacidad: int | None = None  # bytes
     protocolo: str | None = None

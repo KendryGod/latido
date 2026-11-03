@@ -164,10 +164,76 @@ def test_resumen_y_registro_del_fixture_real(gtk):
     assert pagina.grupo_registro.get_visible()
 
 
+def test_etiqueta_ciclos_de_encendido(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    fila, _ = pagina.filas_resumen["ciclos"]
+    assert fila.get_title() == "Ciclos de encendido"
+
+
+def test_grupo_disco_con_fixture_real(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"), _disco())
+    valores = {clave: etiqueta.get_text() for clave, etiqueta in pagina.filas_disco.items()}
+    assert valores == {
+        "modelo": "KINGSTON SNV2S1000G",
+        "serie": "No disponible",  # el fixture va sin serial
+        "firmware": "SBI02105",
+        "capacidad": "1.00 TB",
+        "interfaz": "NVMe",
+    }
+    assert pagina.grupo_disco.get_visible()
+    # Los textos cortos no se parten; los largos sí, con ancho mínimo.
+    assert not pagina.filas_disco["interfaz"].get_wrap()
+    assert pagina.filas_disco["modelo"].get_wrap()
+    assert pagina.filas_disco["modelo"].get_width_chars() == 16
+
+
+def test_numero_serie_en_pantalla_y_seleccionable(gtk):
+    from conftest import cargar
+    from latido.salud import analizar
+
+    datos = cargar("nvme_real.json")
+    datos["serial_number"] = "SINTETICO-0003-QWE"  # solo en memoria
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(analizar(datos), _disco())
+    etiqueta = pagina.filas_disco["serie"]
+    assert etiqueta.get_text() == "SINTETICO-0003-QWE"
+    assert etiqueta.get_selectable()
+    pagina.mostrar_error(ErrorLectura(TipoError.CANCELADO, "Cerraste la ventana de contraseña."))
+    assert etiqueta.get_text() == ""
+    assert not pagina.grupo_disco.get_visible()
+
+
+def test_interfaz_con_otra_conexion(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"), _disco(transporte="usb"))
+    assert pagina.filas_disco["interfaz"].get_text() == "NVMe (conexión USB)"
+
+
+def test_tamano_por_defecto_y_minimo(gtk):
+    from latido.ui.ventana import ALTO, ALTO_MINIMO, ANCHO, ANCHO_MINIMO
+
+    ventana = _ventana([_disco()], lambda disco: None)
+    assert ventana.get_default_size() == (ANCHO, ALTO) == (800, 900)
+    assert ventana.get_size_request() == (ANCHO_MINIMO, ALTO_MINIMO) == (400, 500)
+
+
+def test_registro_dentro_de_area_con_scroll(gtk):
+    _, Gtk = gtk
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"))
+    assert isinstance(pagina, Gtk.ScrolledWindow)
+    assert pagina.get_policy()[1] != Gtk.PolicyType.NEVER
+    assert pagina.grupo_registro.is_ancestor(pagina)
+    assert pagina.grupo_registro.get_visible() and len(pagina._filas_registro) == 18
+
+
 def test_lo_que_falta_dice_no_disponible(gtk):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
     pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_sin_root.json"))
     for _, etiqueta in pagina.filas_resumen.values():
+        assert etiqueta.get_text() == "No disponible"
+    for etiqueta in pagina.filas_disco.values():
         assert etiqueta.get_text() == "No disponible"
 
 

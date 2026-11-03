@@ -343,3 +343,22 @@ def test_explicacion_de_critical_comp_time_en_minutos(base_sintetica):
     fila = next(f for f in analizar(base_sintetica).registro_nvme if f.clave == "critical_comp_time")
     assert fila.texto == "7 min"
     assert "Minutos" in fila.explicacion
+
+
+# --- Número de serie: solo en memoria y en pantalla --------------------------
+
+SERIE_FALSA = "SINTETICO-0001-XYZ"
+
+
+def test_numero_serie_se_lee_pero_no_sale_en_repr_ni_motivos(nvme_real):
+    nvme_real["serial_number"] = SERIE_FALSA  # inyectado en memoria; nunca en un fixture
+    informe = analizar(nvme_real)
+    assert informe.numero_serie == SERIE_FALSA
+    assert SERIE_FALSA not in repr(informe)
+    assert SERIE_FALSA not in str(informe)
+    assert not any(SERIE_FALSA in m for m in informe.motivos)
+    assert not any(SERIE_FALSA in f.texto for f in informe.registro_nvme)
+
+
+def test_numero_serie_ausente(nvme_real):
+    assert analizar(nvme_real).numero_serie is None
