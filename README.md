@@ -12,17 +12,19 @@ tus discos con un color:
 SMART mide el daño acumulado; no predice fallas. Las reglas son criterio
 propio: ver [docs/reglas-salud.md](docs/reglas-salud.md).
 
-## Estado actual (Fase 0)
+## Estado actual (Fase 2)
 
-- Solo discos **NVMe**. Los discos SATA y USB (`/dev/sd*`) aparecen en la
-  lista, deshabilitados, hasta la Fase 2.
-- Solo salud (pestaña "Salud"). La velocidad llega en una fase posterior.
-- Probado con fixtures; la lectura real con pkexec todavía no se ha probado.
+- Pestaña **"Salud"**: solo discos **NVMe**. Los discos SATA y USB (`/dev/sd*`)
+  aparecen en la lista, deshabilitados, hasta una fase posterior.
+- Pestaña **"Velocidad"**: lectura y escritura con fio (cuatro pruebas, con
+  promedio, mejor y peor), en una carpeta que eliges tú. fio escribe un archivo
+  temporal y Latido lo borra al terminar. Ver
+  [docs/velocidad.md](docs/velocidad.md).
 
 ## Dependencias (Fedora 44)
 
 ```
-sudo dnf install python3 python3-gobject gtk4 libadwaita smartmontools polkit
+sudo dnf install python3 python3-gobject gtk4 libadwaita smartmontools polkit fio fio-engine-libaio
 ```
 
 Para las pruebas: `python3-pytest python3-pyflakes`.
