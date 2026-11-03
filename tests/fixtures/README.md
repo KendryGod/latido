@@ -47,6 +47,7 @@ empieza por `SINTETICO-`.
 | `sintetico_precaucion_combinada.json`    | temperatura, medio, repuesto, vida y temp. crítica | PRECAUCION      |
 | `sintetico_malo_combinado.json`          | bits 2 y 3 + temp. crítica + errores de medio      | MALO            |
 | `sintetico_solo_informativo.json`        | datos que solo se muestran, con valores altos      | BUENO           |
+| `sintetico_ata.json`                     | tabla de atributos ATA (Latido aún no la analiza)  | DESCONOCIDO     |
 
 ## fio/
 

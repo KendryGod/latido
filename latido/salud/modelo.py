@@ -27,6 +27,32 @@ class FilaRegistro:
 
 
 @dataclass
+class Disparo:
+    """Una línea de «Por qué»: la regla que se disparó (docs/veredicto.md) y lo que dice.
+
+    regla es None y estado es None en las líneas solo informativas. cifra es la cifra clave a la que la
+    regla le da color (temperatura, vida, reserva, errores), o None.
+    """
+
+    regla: str | None
+    estado: Estado | None
+    motivo: str
+    cifra: str | None = None
+
+
+@dataclass
+class AtributoAta:
+    """Una fila de la tabla de atributos SMART de un disco ATA, tal como la da smartctl."""
+
+    id: int
+    nombre: str
+    valor: int | None
+    peor: int | None
+    umbral: int | None
+    crudo: str
+
+
+@dataclass
 class InformeSalud:
     # Nunca BUENO por omisión: solo el diagnóstico puede subirlo.
     estado: Estado = Estado.DESCONOCIDO
@@ -57,4 +83,6 @@ class InformeSalud:
 
     smartctl_exit: int | None = None  # máscara combinada (JSON y proceso)
     registro_nvme: list[FilaRegistro] = field(default_factory=list)
-    atributos_ata: list = field(default_factory=list)  # reservado para la Fase 2
+    # Tabla de atributos ATA: se lee y se muestra, pero Latido todavía no la analiza (soporte SATA: fase 5).
+    atributos_ata: list[AtributoAta] = field(default_factory=list)
+    disparos: list[Disparo] = field(default_factory=list)  # las mismas líneas que motivos, con su regla

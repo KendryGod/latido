@@ -5,31 +5,41 @@ import traceback
 
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from latido.salud import Estado, formato
+from latido.salud import Estado, InformeSalud, formato
+from latido.salud.cifras import SIN_VALOR, cifras_clave
 from latido.sistema.lectura import ErrorLectura, TipoError
 
 # Estado: (texto, clase de latido/ui/estilo.py, ícono simbólico, frase).
 # El ícono y el texto hacen que el color no sea la única señal.
 APARIENCIA = {
-    Estado.BUENO: ("BUENO", "latido-bueno", "object-select-symbolic", "Sin señales de daño en los datos SMART."),
+    Estado.BUENO: ("Bueno", "latido-bueno", "object-select-symbolic", "El disco no reporta problemas en sus datos SMART."),
     Estado.PRECAUCION: (
-        "PRECAUCIÓN", "latido-precaucion", "dialog-warning-symbolic", "Hay señales de riesgo. Revisa los motivos."
+        "Precaución", "latido-precaucion", "dialog-warning-symbolic", "Hay señales de riesgo. Mira el porqué."
     ),
-    Estado.MALO: ("MALO", "latido-malo", "dialog-error-symbolic", "El disco reporta fallas. Mejor evítalo."),
+    Estado.MALO: (
+        "Peligro", "latido-malo", "dialog-error-symbolic", "El disco reporta fallas: no le confíes datos importantes."
+    ),
     Estado.DESCONOCIDO: (
-        "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic", "No hay datos suficientes para opinar."
+        "Sin datos", "latido-desconocido", "dialog-question-symbolic", "No hay datos suficientes para opinar."
     ),
 }
+# Estado de una cifra clave: (palabra, clase, ícono). El color nunca va solo.
+APARIENCIA_CIFRA = {
+    Estado.BUENO: ("Normal", "latido-bueno", "object-select-symbolic"),
+    Estado.PRECAUCION: ("Atención", "latido-precaucion", "dialog-warning-symbolic"),
+    Estado.MALO: ("Peligro", "latido-malo", "dialog-error-symbolic"),
+    None: ("Sin dato", "latido-desconocido", "dialog-question-symbolic"),
+    "informativa": ("Informativo", "latido-desconocido", "dialog-information-symbolic"),
+}
+# Ícono de cada línea de «Por qué» según el estado que da su regla (None: solo informa).
+ICONO_MOTIVO = {
+    Estado.BUENO: "object-select-symbolic",
+    Estado.PRECAUCION: "dialog-warning-symbolic",
+    Estado.MALO: "dialog-error-symbolic",
+    Estado.DESCONOCIDO: "dialog-question-symbolic",
+    None: "dialog-information-symbolic",
+}
 CLASES_ESTADO = [clase for _, clase, _, _ in APARIENCIA.values()]
-
-FILAS_RESUMEN = [
-    ("vida", "Vida restante"),
-    ("temperatura", "Temperatura"),
-    ("horas", "Horas encendido"),
-    ("ciclos", "Ciclos de encendido"),
-    ("tb_escritos", "Datos escritos"),
-    ("tb_leidos", "Datos leídos"),
-]
 
 NOTA = (
     "SMART mide el daño que el disco ha acumulado; no predice fallas. "
@@ -55,17 +65,6 @@ def _fila(titulo, subtitulo=None):
     if subtitulo:
         fila.set_subtitle(subtitulo)
     return fila
-
-
-def _detalle_temperatura(informe):
-    umbrales = []
-    if informe.temperatura_advertencia is not None:
-        umbrales.append(f"advertencia a {formato.temperatura(informe.temperatura_advertencia)}")
-    if informe.temperatura_critica is not None:
-        umbrales.append(f"crítica a {formato.temperatura(informe.temperatura_critica)}")
-    if not umbrales:
-        return None
-    return "Umbrales del propio disco: " + ", ".join(umbrales)
 
 
 FILAS_DISCO = [
@@ -113,21 +112,6 @@ def _fabrica_selector(elipsis):
     return fabrica
 
 
-def textos_resumen(informe):
-    """Para cada fila del resumen: (valor, detalle o None)."""
-    return {
-        "vida": (
-            formato.porcentaje(informe.vida_pct),
-            None if informe.uso_pct is None else f"Desgaste reportado: {informe.uso_pct} %",
-        ),
-        "temperatura": (formato.temperatura(informe.temperatura), _detalle_temperatura(informe)),
-        "horas": (formato.entero(informe.horas), None),
-        "ciclos": (formato.entero(informe.ciclos), None),
-        "tb_escritos": (formato.terabytes(informe.tb_escritos), None),
-        "tb_leidos": (formato.terabytes(informe.tb_leidos), None),
-    }
-
-
 def _etiqueta_valor(texto, ancho=24):
     """Valor a la derecha de una fila: en una línea si es corto; si no, con ajuste."""
     etiqueta = Gtk.Label(label=texto, xalign=1, justify=Gtk.Justification.RIGHT)
@@ -145,6 +129,59 @@ def etiquetas_selector(discos):
         f"{corta} · {disco.nombre}" if cortas.count(corta) > 1 else corta
         for corta, disco in zip(cortas, discos)
     ]
+
+
+def _numero(valor):
+    return SIN_VALOR if valor is None else f"{valor:,}"
+
+
+class TarjetaCifra(Gtk.Box):
+    """Una cifra clave: título, número grande (.numeric) con su unidad, estado (ícono + palabra) y detalle."""
+
+    def __init__(self, cifra):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.add_css_class("card")
+        interior = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=18, margin_bottom=18,
+                           margin_start=18, margin_end=18)
+        self.titulo = Gtk.Label(label=cifra.titulo, xalign=0, wrap=True)
+        self.titulo.add_css_class("caption-heading")
+        self.titulo.add_css_class("dimmed")
+        numero = Gtk.Box(spacing=6)
+        self.valor = Gtk.Label(xalign=0, valign=Gtk.Align.BASELINE_FILL)
+        self.valor.add_css_class("title-1")
+        self.valor.add_css_class("numeric")
+        self.unidad = Gtk.Label(label=cifra.unidad, xalign=0, valign=Gtk.Align.BASELINE_FILL)
+        self.unidad.add_css_class("title-4")
+        self.unidad.add_css_class("dimmed")
+        numero.append(self.valor)
+        numero.append(self.unidad)
+        self.chip = Gtk.Box(spacing=6, halign=Gtk.Align.START)
+        self.chip.add_css_class("latido-chip")
+        self.icono = Gtk.Image()
+        self.palabra = Gtk.Label()
+        self.palabra.add_css_class("caption-heading")
+        self.chip.append(self.icono)
+        self.chip.append(self.palabra)
+        self.detalle = Gtk.Label(xalign=0, wrap=True)
+        self.detalle.add_css_class("caption")
+        self.detalle.add_css_class("dimmed")
+        for hijo in (self.titulo, numero, self.chip, self.detalle):
+            interior.append(hijo)
+        self.append(interior)
+        self.mostrar(cifra)
+
+    def mostrar(self, cifra):
+        self.valor.set_text(cifra.valor)
+        self.unidad.set_visible(bool(cifra.unidad) and cifra.valor != SIN_VALOR)
+        clave = "informativa" if cifra.informativa and cifra.valor != SIN_VALOR else cifra.estado
+        palabra, clase, icono = APARIENCIA_CIFRA[clave]
+        for otra in CLASES_ESTADO:
+            self.chip.remove_css_class(otra)
+        self.chip.add_css_class(clase)
+        self.icono.set_from_icon_name(icono)
+        self.palabra.set_text(palabra)
+        self.detalle.set_text(cifra.detalle or "")
+        self.detalle.set_visible(bool(cifra.detalle))
 
 
 class PaginaSalud(Gtk.ScrolledWindow):
@@ -187,26 +224,51 @@ class PaginaSalud(Gtk.ScrolledWindow):
         caja.append(self.vistas)
         caja = self.contenido  # lo de abajo es el informe
 
-        # Panel grande de estado.
-        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        panel.add_css_class("card")
-        self.insignia = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER, margin_top=24)
+        # Tarjeta del veredicto: ícono grande y palabra, una frase y el disco.
+        tarjeta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        tarjeta.add_css_class("card")
+        interior = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=24, margin_bottom=24,
+                           margin_start=24, margin_end=24)
+        self.insignia = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER)
         self.insignia.add_css_class("latido-insignia")
-        self.icono_estado = Gtk.Image(pixel_size=32, visible=False)
+        self.icono_estado = Gtk.Image(pixel_size=48, visible=False)
         self.etiqueta_estado = Gtk.Label()
         self.etiqueta_estado.add_css_class("title-1")
         self.insignia.append(self.icono_estado)
         self.insignia.append(self.etiqueta_estado)
-        panel.append(self.insignia)
         self.etiqueta_frase = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
         self.etiqueta_frase.add_css_class("title-4")
-        self.etiqueta_disco = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, margin_bottom=24)
+        self.etiqueta_disco = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
         self.etiqueta_disco.add_css_class("dimmed")
-        for etiqueta in (self.etiqueta_frase, self.etiqueta_disco):
-            etiqueta.set_margin_start(18)
-            etiqueta.set_margin_end(18)
-            panel.append(etiqueta)
-        caja.append(panel)
+        for hijo in (self.insignia, self.etiqueta_frase, self.etiqueta_disco):
+            interior.append(hijo)
+        tarjeta.append(interior)
+        caja.append(tarjeta)
+
+        # «Por qué»: una fila por línea, con el ícono del estado que da su regla.
+        self.grupo_motivos = Adw.PreferencesGroup(title="Por qué")
+        self._filas_motivos = []
+        caja.append(self.grupo_motivos)
+
+        # Cifras clave: número grande, unidad y estado propio.
+        self.grid_cifras = Gtk.FlowBox(
+            selection_mode=Gtk.SelectionMode.NONE, homogeneous=True, min_children_per_line=2,
+            max_children_per_line=3, column_spacing=12, row_spacing=12,
+        )
+        self.cifras = {}
+        for cifra in cifras_clave(InformeSalud()):
+            self.cifras[cifra.clave] = TarjetaCifra(cifra)
+            self.grid_cifras.append(self.cifras[cifra.clave])
+        caja.append(self.grid_cifras)
+
+        # «Todos los datos», plegado.
+        self.expansor = Gtk.Expander(expanded=False)
+        titulo_datos = Gtk.Label(label="Todos los datos")
+        titulo_datos.add_css_class("heading")
+        self.expansor.set_label_widget(titulo_datos)
+        datos = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18, margin_top=12)
+        self.expansor.set_child(datos)
+        caja.append(self.expansor)
 
         self.grupo_disco = Adw.PreferencesGroup(title="Disco")
         self.filas_disco = {}
@@ -221,28 +283,21 @@ class PaginaSalud(Gtk.ScrolledWindow):
             fila.add_suffix(valor)
             self.filas_disco[clave] = valor
             self.grupo_disco.add(fila)
-        caja.append(self.grupo_disco)
-
-        self.grupo_resumen = Adw.PreferencesGroup(title="Resumen")
-        self.filas_resumen = {}
-        for clave, titulo in FILAS_RESUMEN:
-            fila = _fila(titulo)
-            valor = Gtk.Label(xalign=1)
-            fila.add_suffix(valor)
-            self.filas_resumen[clave] = (fila, valor)
-            self.grupo_resumen.add(fila)
-        caja.append(self.grupo_resumen)
-
-        self.grupo_motivos = Adw.PreferencesGroup(title="Motivos")
-        self._filas_motivos = []
-        caja.append(self.grupo_motivos)
+        datos.append(self.grupo_disco)
 
         self.grupo_registro = Adw.PreferencesGroup(
             title="Registro de salud NVMe",
-            description="Lo que el propio disco guarda sobre su salud, con la explicación de cada dato.",
+            description="Lo que el propio disco guarda sobre su salud: el valor y su explicación.",
         )
         self._filas_registro = []
-        caja.append(self.grupo_registro)
+        datos.append(self.grupo_registro)
+
+        self.grupo_ata = Adw.PreferencesGroup(
+            title="Atributos SMART (ATA)",
+            description="La tabla de smartctl, tal cual. Latido todavía no la analiza.",
+        )
+        self._filas_ata = []
+        datos.append(self.grupo_ata)
 
         nota = Gtk.Label(label=NOTA, wrap=True, xalign=0)
         nota.add_css_class("dimmed")
@@ -396,23 +451,23 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self.etiqueta_frase.set_text(frase)
 
     def _limpiar(self):
-        for fila in self._filas_motivos:
-            self.grupo_motivos.remove(fila)
-        for fila in self._filas_registro:
-            self.grupo_registro.remove(fila)
-        self._filas_motivos = []
-        self._filas_registro = []
+        for grupo, filas in ((self.grupo_motivos, self._filas_motivos), (self.grupo_registro, self._filas_registro),
+                             (self.grupo_ata, self._filas_ata)):
+            for fila in filas:
+                grupo.remove(fila)
+        self._filas_motivos, self._filas_registro, self._filas_ata = [], [], []
         for valor in self.filas_disco.values():
             valor.set_text("")
-        for grupo in (self.grupo_disco, self.grupo_resumen, self.grupo_motivos, self.grupo_registro):
+        for grupo in (self.grupo_disco, self.grupo_motivos, self.grupo_registro, self.grupo_ata):
             grupo.set_visible(False)
 
-    def _agregar_motivos(self, motivos):
-        for motivo in motivos:
-            fila = _fila(motivo)
+    def _agregar_motivos(self, disparos):
+        for disparo in disparos:
+            fila = _fila(disparo.motivo)
+            fila.add_prefix(Gtk.Image(icon_name=ICONO_MOTIVO[disparo.estado]))
             self.grupo_motivos.add(fila)
             self._filas_motivos.append(fila)
-        self.grupo_motivos.set_visible(bool(motivos))
+        self.grupo_motivos.set_visible(bool(disparos))
 
     def mostrar_error(self, error, disco=None):
         """Errores en una Adw.StatusPage con «Reintentar». Cerrar la ventana de contraseña no es un error rojo."""
@@ -442,6 +497,11 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self._poner_estado(texto, frase, informe.estado)
 
         self.etiqueta_disco.set_text(disco.etiqueta if disco else (informe.dispositivo or ""))
+        self._agregar_motivos(informe.disparos)
+
+        for cifra in cifras_clave(informe):
+            self.cifras[cifra.clave].mostrar(cifra)
+        self.grid_cifras.set_visible(informe.tipo == "nvme")  # las seis cifras son de NVMe
 
         for clave, valor in textos_disco(informe, disco).items():
             etiqueta = self.filas_disco[clave]
@@ -452,17 +512,19 @@ class PaginaSalud(Gtk.ScrolledWindow):
             etiqueta.set_width_chars(16 if largo else -1)
         self.grupo_disco.set_visible(True)
 
-        for clave, (valor, detalle) in textos_resumen(informe).items():
-            fila, etiqueta = self.filas_resumen[clave]
-            etiqueta.set_text(valor)
-            fila.set_subtitle(detalle or "")
-        self.grupo_resumen.set_visible(True)
-
-        self._agregar_motivos(informe.motivos)
-
         for fila_registro in informe.registro_nvme:
             fila = _fila(fila_registro.nombre, fila_registro.explicacion)
             fila.add_suffix(_etiqueta_valor(fila_registro.texto))
             self.grupo_registro.add(fila)
             self._filas_registro.append(fila)
         self.grupo_registro.set_visible(bool(informe.registro_nvme))
+
+        for atributo in informe.atributos_ata:
+            fila = _fila(
+                f"{atributo.id} · {atributo.nombre}",
+                f"Valor {_numero(atributo.valor)} · Peor {_numero(atributo.peor)} · Umbral {_numero(atributo.umbral)}",
+            )
+            fila.add_suffix(_etiqueta_valor(atributo.crudo))
+            self.grupo_ata.add(fila)
+            self._filas_ata.append(fila)
+        self.grupo_ata.set_visible(bool(informe.atributos_ata))

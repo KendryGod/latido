@@ -16,6 +16,10 @@ CSS = """
   border-radius: 12px;
   padding: 12px 24px;
 }
+.latido-chip {
+  border-radius: 6px;
+  padding: 0 6px;
+}
 .latido-bueno {
   background-color: @blue_3;
   color: @light_1;

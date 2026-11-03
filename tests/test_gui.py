@@ -37,7 +37,7 @@ def test_al_abrir_no_lee_ni_pide_contrasena(gtk):
     assert pagina.etiqueta_estado.get_text() == "—"
     assert pagina.boton.get_label() == "Leer salud"
     assert pagina.boton.get_sensitive()
-    assert not pagina.grupo_resumen.get_visible()
+    assert pagina.mostrando_estado()
 
 
 def test_el_esquema_de_color_sigue_al_sistema(gtk):
@@ -58,10 +58,10 @@ CLASES_DE_ESTADO = {"latido-bueno", "latido-precaucion", "latido-malo", "latido-
 
 
 @pytest.mark.parametrize("archivo, texto, clase, icono", [
-    ("nvme_real.json", "BUENO", "latido-bueno", "object-select-symbolic"),
-    ("sintetico_precaucion.json", "PRECAUCIÓN", "latido-precaucion", "dialog-warning-symbolic"),
-    ("sintetico_malo.json", "MALO", "latido-malo", "dialog-error-symbolic"),
-    ("sintetico_desconocido.json", "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic"),
+    ("nvme_real.json", "Bueno", "latido-bueno", "object-select-symbolic"),
+    ("sintetico_precaucion.json", "Precaución", "latido-precaucion", "dialog-warning-symbolic"),
+    ("sintetico_malo.json", "Peligro", "latido-malo", "dialog-error-symbolic"),
+    ("sintetico_desconocido.json", "Sin datos", "latido-desconocido", "dialog-question-symbolic"),
 ])
 def test_cada_estado_aplica_su_clase_icono_y_texto(gtk, archivo, texto, clase, icono):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
@@ -116,26 +116,23 @@ def test_un_css_roto_si_se_detecta(gtk):
     assert errores
 
 
-def test_resumen_y_registro_del_fixture_real(gtk):
+def test_cifras_clave_y_registro_del_fixture_real(gtk):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
     pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"))
-    valores = {clave: etiqueta.get_text() for clave, (_, etiqueta) in pagina.filas_resumen.items()}
-    assert valores == {
-        "vida": "99 %",
-        "temperatura": "46 °C",
-        "horas": "4,921",
-        "ciclos": "934",
-        "tb_escritos": "13.08 TB",
-        "tb_leidos": "16.60 TB",
+    vistas = {clave: (t.titulo.get_text(), t.valor.get_text(), t.unidad.get_text(), t.palabra.get_text(),
+                      t.detalle.get_text()) for clave, t in pagina.cifras.items()}
+    assert vistas == {
+        "temperatura": ("Temperatura", "46", "°C", "Normal", "Umbrales del disco: advertencia 83 °C · crítica 90 °C"),
+        "vida": ("Vida usada", "1", "%", "Normal", "Estimación del propio disco. Queda 99 %."),
+        "reserva": ("Reserva disponible", "100", "%", "Normal", "Umbral del disco: 10 %"),
+        "horas": ("Horas encendido", "4,921", "h", "Informativo", "934 ciclos de encendido"),
+        "escritos": ("Datos escritos", "13.08", "TB", "Informativo", "Leídos: 16.60 TB"),
+        "errores": ("Errores de medios", "0", "", "Normal", "Datos que el disco no pudo corregir"),
     }
+    assert all("numeric" in t.valor.get_css_classes() for t in pagina.cifras.values())
+    assert pagina.grid_cifras.get_visible()
     assert len(pagina._filas_registro) == 18
     assert pagina.grupo_registro.get_visible()
-
-
-def test_etiqueta_ciclos_de_encendido(gtk):
-    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
-    fila, _ = pagina.filas_resumen["ciclos"]
-    assert fila.get_title() == "Ciclos de encendido"
 
 
 def test_grupo_disco_con_fixture_real(gtk):
@@ -192,6 +189,7 @@ def test_registro_dentro_de_area_con_scroll(gtk):
     pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"))
     assert isinstance(pagina, Gtk.ScrolledWindow)
     assert pagina.get_policy()[1] != Gtk.PolicyType.NEVER
+    pagina.expansor.set_expanded(True)  # plegado, GTK saca al hijo del árbol de widgets
     assert pagina.grupo_registro.is_ancestor(pagina)
     assert pagina.grupo_registro.get_visible() and len(pagina._filas_registro) == 18
 
@@ -199,7 +197,8 @@ def test_registro_dentro_de_area_con_scroll(gtk):
 def test_lo_que_falta_dice_no_disponible(gtk):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
     pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_desconocido.json"))  # sin percentage_used
-    assert pagina.filas_resumen["vida"][1].get_text() == "No disponible"
+    assert pagina.cifras["vida"].valor.get_text() == "—"
+    assert pagina.cifras["vida"].palabra.get_text() == "Sin dato"
     assert pagina.filas_disco["serie"].get_text() == "No disponible"
 
 
@@ -220,7 +219,7 @@ def test_lectura_en_hilo_y_resultado_con_idle_add(gtk):
     assert not pagina.boton.get_sensitive()
     esperar(GLib, lambda: not pagina.leyendo)
     assert not pagina.leyendo
-    assert pagina.etiqueta_estado.get_text() == "BUENO"
+    assert pagina.etiqueta_estado.get_text() == "Bueno"
     assert pagina.boton.get_sensitive()
 
 
@@ -243,9 +242,8 @@ def test_error_no_deja_datos_viejos(gtk):
         esperar(GLib, lambda: not pagina.leyendo)
     assert pagina.mostrando_estado()
     assert pagina.pagina_estado.get_title() == "No se leyó el disco"
-    assert not pagina.grupo_resumen.get_visible()
     assert not pagina.grupo_registro.get_visible()
-    assert pagina._filas_registro == [] and pagina._filas_motivos == []
+    assert pagina._filas_registro == [] and pagina._filas_motivos == [] and pagina._filas_ata == []
     assert pagina.informe is None
 
 
@@ -398,4 +396,62 @@ def test_acerca_de(gtk):
     assert dialogo.get_application_name() == "Latido"
     assert dialogo.get_version() == __version__
     assert dialogo.get_license_type() == gtk[1].License.GPL_3_0
+
+
+# --- B3: la vista de Salud ---
+
+
+def test_tarjeta_del_veredicto_con_icono_grande_y_title_1(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_malo.json"), _disco())
+    assert pagina.icono_estado.get_pixel_size() == 48
+    assert "title-1" in pagina.etiqueta_estado.get_css_classes()
+    assert pagina.etiqueta_frase.get_text() == "El disco reporta fallas: no le confíes datos importantes."
+    assert pagina.etiqueta_disco.get_text() == _disco().etiqueta
+
+
+def test_por_que_una_fila_por_regla_con_su_icono(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    informe = cargar_fixture(FIXTURES / "sintetico_precaucion.json")
+    pagina.mostrar_informe(informe)
+    assert pagina.grupo_motivos.get_title() == "Por qué"
+    assert [f.get_title() for f in pagina._filas_motivos] == informe.motivos
+    iconos = [f.get_first_child().get_first_child().get_first_child().get_icon_name() for f in pagina._filas_motivos]
+    assert iconos == ["dialog-warning-symbolic"] * len(informe.motivos)
+
+
+def test_cada_cifra_toma_el_estado_de_su_regla(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_precaucion.json"))
+    palabras = {clave: t.palabra.get_text() for clave, t in pagina.cifras.items()}
+    assert palabras == {"temperatura": "Normal", "vida": "Atención", "reserva": "Normal", "horas": "Informativo",
+                        "escritos": "Informativo", "errores": "Atención"}
+    assert "latido-precaucion" in pagina.cifras["vida"].chip.get_css_classes()
+    assert pagina.cifras["vida"].icono.get_icon_name() == "dialog-warning-symbolic"
+
+
+def test_todos_los_datos_esta_plegado_al_abrir(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"))
+    assert not pagina.expansor.get_expanded()
+    datos = pagina.expansor.get_child()
+    assert pagina.grupo_registro.is_ancestor(datos) and pagina.grupo_disco.is_ancestor(datos)
+
+
+def test_la_vista_pinta_la_tabla_ata(gtk):
+    """sintetico_ata.json: datos inventados, NO medidos en hardware. La vista los pinta; no promete SATA."""
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_ata.json"))
+    assert not pagina.mostrando_estado()
+    assert pagina.etiqueta_estado.get_text() == "Sin datos"
+    assert pagina.grupo_ata.get_visible() and len(pagina._filas_ata) == 7
+    primera, temperatura = pagina._filas_ata[0], pagina._filas_ata[3]
+    assert primera.get_title() == "5 · Reallocated_Sector_Ct"
+    assert primera.get_subtitle() == "Valor 100 · Peor 100 · Umbral 10"
+    assert temperatura.get_title() == "194 · Temperature_Celsius"
+    assert "todavía no la analiza" in pagina.grupo_ata.get_description()
+    assert [f.get_title() for f in pagina._filas_motivos] == [
+        "Latido todavía no analiza discos de tipo ATA. No se puede saber el estado."
+    ]
+    assert not pagina.grid_cifras.get_visible()  # las seis cifras son de NVMe
 

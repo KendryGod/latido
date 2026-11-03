@@ -6,8 +6,8 @@ nunca BUENO por omisión.
 
 import re
 
-from latido.salud import explicaciones, formato
-from latido.salud.modelo import Estado, FilaRegistro, InformeSalud
+from latido.salud import explicaciones, formato, reglas
+from latido.salud.modelo import AtributoAta, Disparo, Estado, FilaRegistro, InformeSalud
 from latido.salud.salida_smartctl import (
     BIT_AUTODIAGNOSTICO,
     BIT_DISCO_FALLANDO,
@@ -58,8 +58,27 @@ def _mensajes_smartctl(datos):
     for mensaje in _dict(datos.get("smartctl")).get("messages") or []:
         texto = _texto(_dict(mensaje).get("string"))
         if texto:
-            mensajes.append(f"Mensaje original de smartctl (en inglés): «{texto}»")
+            mensajes.append(f"Mensaje de smartctl, tal cual (en inglés): «{texto}»")
     return mensajes
+
+
+def _disparo(regla_id, motivo):
+    regla = reglas.POR_ID[regla_id]
+    return Disparo(regla.id, regla.resultado, motivo, regla.cifra)
+
+
+def _info(motivo):
+    """Línea solo informativa: no viene de una regla y no da color."""
+    return Disparo(None, None, motivo)
+
+
+def _bien(motivo):
+    return Disparo(None, Estado.BUENO, motivo)
+
+
+def _registrar(informe, disparos):
+    informe.disparos.extend(disparos)
+    informe.motivos.extend(disparo.motivo for disparo in disparos)
 
 
 def analizar(datos, codigo_proceso=None, salida_invalida=False):
@@ -74,7 +93,9 @@ def analizar(datos, codigo_proceso=None, salida_invalida=False):
     if salida_invalida or not isinstance(datos, dict):
         if isinstance(codigo_proceso, int):
             informe.smartctl_exit = codigo_proceso
-        informe.motivos.append("smartctl respondió, pero su salida no es JSON válido. No se puede saber el estado.")
+        _registrar(informe, [_disparo(
+            "SALIDA-INVALIDA", "smartctl respondió, pero su salida no es JSON válido. No se puede saber el estado."
+        )])
         return informe
 
     _leer_datos_generales(informe, datos)
@@ -83,26 +104,28 @@ def analizar(datos, codigo_proceso=None, salida_invalida=False):
     mascara, avisos = combinar_codigos(codigo_json, codigo_proceso)
     informe.smartctl_exit = mascara
     if mascara is None:
-        informe.motivos.extend(avisos)
-        informe.motivos.append("No se puede saber el estado.")
+        _registrar(informe, [_info(aviso) for aviso in avisos])
+        _registrar(informe, [_disparo("SALIDA-INVALIDA", "No se puede saber el estado.")])
         return informe
 
     if mascara & BITS_SIN_DATOS:
-        informe.motivos.extend(describir_bit(b) for b in bits_activos(mascara & BITS_SIN_DATOS))
-        informe.motivos.append("smartctl no obtuvo datos válidos. No se puede saber el estado.")
-        informe.motivos.extend(_mensajes_smartctl(datos))
-        informe.motivos.extend(avisos)
+        disparos = [_disparo("SMART-SIN-DATOS", describir_bit(b)) for b in bits_activos(mascara & BITS_SIN_DATOS)]
+        disparos.append(_disparo("SMART-SIN-DATOS", "smartctl no obtuvo datos válidos. No se puede saber el estado."))
+        disparos.extend(_info(mensaje) for mensaje in _mensajes_smartctl(datos))
+        disparos.extend(_info(aviso) for aviso in avisos)
+        _registrar(informe, disparos)
         return informe
 
     if informe.tipo == "nvme":
         _leer_nvme(informe, datos)
         _diagnosticar_nvme(informe, datos, mascara)
     else:
+        _leer_ata(informe, datos)
         nombre = informe.protocolo or "desconocido"
-        informe.motivos.append(
-            f"Latido todavía no analiza discos de tipo {nombre}. No se puede saber el estado."
-        )
-    informe.motivos.extend(avisos)
+        _registrar(informe, [_disparo(
+            "TIPO-SIN-ANALISIS", f"Latido todavía no analiza discos de tipo {nombre}. No se puede saber el estado."
+        )])
+    _registrar(informe, [_info(aviso) for aviso in avisos])
     return informe
 
 
@@ -151,6 +174,30 @@ def _leer_nvme(informe, datos):
     informe.registro_nvme = construir_registro(registro)
 
 
+def _entero_o_none(valor):
+    return valor if isinstance(valor, int) and not isinstance(valor, bool) else None
+
+
+def _leer_ata(informe, datos):
+    """La tabla de atributos ATA (id, nombre, valor, peor, umbral, crudo). Se muestra; no se analiza."""
+    tabla = _dict(datos.get("ata_smart_attributes")).get("table")
+    for fila in tabla if isinstance(tabla, list) else []:
+        fila = _dict(fila)
+        identificador = _entero_o_none(fila.get("id"))
+        if identificador is None:
+            continue
+        crudo = _dict(fila.get("raw"))
+        valor_crudo = _entero_o_none(crudo.get("value"))
+        informe.atributos_ata.append(AtributoAta(
+            id=identificador,
+            nombre=_texto(fila.get("name")) or f"Atributo {identificador}",
+            valor=_entero_o_none(fila.get("value")),
+            peor=_entero_o_none(fila.get("worst")),
+            umbral=_entero_o_none(fila.get("thresh")),
+            crudo=_texto(crudo.get("string")) or (formato.NO_DISPONIBLE if valor_crudo is None else str(valor_crudo)),
+        ))
+
+
 def construir_registro(registro):
     filas = []
     for clave, valor in registro.items():
@@ -182,75 +229,91 @@ def _diagnosticar_nvme(informe, datos, mascara):
     if advertencia is None:
         faltan.append("advertencia crítica (critical_warning)")
         if smartctl_dice_falla:
-            malos.append("smartctl indica que el disco está fallando y no hay advertencia crítica que detalle el motivo.")
+            malos.append(_disparo(
+                "NVME-FALLA-SIN-DETALLE",
+                "smartctl indica que el disco está fallando y no hay advertencia crítica que detalle el motivo.",
+            ))
     else:
         for bit in bits_activos(advertencia):
             texto = explicaciones.BITS_ADVERTENCIA_CRITICA.get(bit, f"bit reservado {bit} activo")
-            destino = precauciones if bit == explicaciones.BIT_TEMPERATURA else malos
-            destino.append(f"Advertencia crítica del disco: {texto}.")
+            disparo = _disparo(reglas.REGLA_ADVERTENCIA_CRITICA.get(bit, "NVME-AC-RESERVADO"),
+                               f"Advertencia crítica del disco: {texto}.")
+            (precauciones if disparo.estado is Estado.PRECAUCION else malos).append(disparo)
         if advertencia == 0 and smartctl_dice_falla:
-            malos.append(
+            malos.append(_disparo(
+                "NVME-CONTRADICCION",
                 "smartctl indica que el disco está fallando, aunque la advertencia crítica es 0. "
-                "Los datos se contradicen."
-            )
+                "Los datos se contradicen.",
+            ))
 
     if mascara & BIT_PREFALLA:
-        malos.append(describir_bit(4))
-    for bit_mascara, bit in ((BIT_UMBRAL_PASADO, 5), (BIT_REGISTRO_ERRORES, 6), (BIT_AUTODIAGNOSTICO, 7)):
+        malos.append(_disparo("SMART-PREFALLA", describir_bit(4)))
+    for bit_mascara, bit, regla in (
+        (BIT_UMBRAL_PASADO, 5, "SMART-UMBRAL-PASADO"),
+        (BIT_REGISTRO_ERRORES, 6, "SMART-REGISTRO-ERRORES"),
+        (BIT_AUTODIAGNOSTICO, 7, "SMART-AUTODIAGNOSTICO"),
+    ):
         if mascara & bit_mascara:
-            precauciones.append(describir_bit(bit))
+            precauciones.append(_disparo(regla, describir_bit(bit)))
 
     if informe.errores_medio is None:
         faltan.append("errores de medio")
     elif informe.errores_medio > 0:
-        precauciones.append(f"El disco tiene {informe.errores_medio:,} errores de medio (datos que no pudo corregir).")
+        precauciones.append(_disparo(
+            "NVME-ERRORES-MEDIO",
+            f"El disco tiene {informe.errores_medio:,} errores de medio (datos que no pudo corregir).",
+        ))
 
     if informe.repuesto_pct is None or informe.repuesto_umbral_pct is None:
         faltan.append("repuesto disponible y su umbral")
     elif informe.repuesto_pct <= informe.repuesto_umbral_pct:
-        precauciones.append(
+        precauciones.append(_disparo(
+            "NVME-RESERVA",
             f"El repuesto disponible ({informe.repuesto_pct} %) está en o bajo su umbral "
-            f"({informe.repuesto_umbral_pct} %)."
-        )
+            f"({informe.repuesto_umbral_pct} %).",
+        ))
 
     if informe.vida_pct is None:
         faltan.append("desgaste (percentage_used)")
     elif informe.vida_pct <= UMBRAL_VIDA_PCT:
-        precauciones.append(f"Queda {informe.vida_pct} % de vida estimada (desgaste: {informe.uso_pct} %).")
+        precauciones.append(_disparo(
+            "LATIDO-VIDA", f"Queda {informe.vida_pct} % de vida estimada (desgaste: {informe.uso_pct} %)."
+        ))
 
     # Unidad: minutos (NVMe Base Specification 2.0c, figura 207). No es un
     # dato obligatorio para BUENO: si falta, no cambia el estado.
     minutos_criticos = leer_entero(registro, "critical_comp_time")
     if minutos_criticos is not None and minutos_criticos > 0:
-        precauciones.append(
-            f"El disco pasó {minutos_criticos:,} minutos en o por encima de su temperatura crítica."
-        )
+        precauciones.append(_disparo(
+            "NVME-TIEMPO-CRITICO",
+            f"El disco pasó {minutos_criticos:,} minutos en o por encima de su temperatura crítica.",
+        ))
 
     incompleto = bool(mascara & BIT_ORDEN_FALLIDA)
     aviso_faltan = "Faltan datos: " + ", ".join(faltan) + "."
 
     if malos:
         informe.estado = Estado.MALO
-        informe.motivos.extend(malos + precauciones)
+        disparos = malos + precauciones
     elif precauciones:
         informe.estado = Estado.PRECAUCION
-        informe.motivos.extend(precauciones)
+        disparos = precauciones
     elif faltan or incompleto:
         informe.estado = Estado.DESCONOCIDO
-        if faltan:
-            informe.motivos.append(aviso_faltan)
-        informe.motivos.append("No hay datos suficientes para decir que el disco está bien.")
+        disparos = [_disparo("FALTAN-DATOS", aviso_faltan)] if faltan else []
+        disparos.append(_info("No hay datos suficientes para decir que el disco está bien."))
     else:
         informe.estado = Estado.BUENO
-        informe.motivos.extend([
+        disparos = [_bien(texto) for texto in (
             "El disco no reporta advertencias críticas.",
             "0 errores de medio.",
             f"Repuesto disponible: {informe.repuesto_pct} % (umbral {informe.repuesto_umbral_pct} %).",
             f"Vida estimada restante: {informe.vida_pct} %.",
-        ])
+        )]
 
     if faltan and informe.estado in (Estado.MALO, Estado.PRECAUCION):
-        informe.motivos.append(aviso_faltan)
+        disparos.append(_disparo("FALTAN-DATOS", aviso_faltan))
     if incompleto:
-        informe.motivos.append(describir_bit(2) + " Los datos pueden estar incompletos.")
-        informe.motivos.extend(_mensajes_smartctl(datos))
+        disparos.append(_disparo("SMART-INCOMPLETO", describir_bit(2) + " Los datos pueden estar incompletos."))
+        disparos.extend(_info(mensaje) for mensaje in _mensajes_smartctl(datos))
+    _registrar(informe, disparos)

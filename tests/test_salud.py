@@ -2,7 +2,7 @@
 
 import pytest
 
-from conftest import cargar
+from conftest import FIXTURES, cargar
 from latido.salud import Estado, InformeSalud, analizar, explicaciones, formato
 from latido.salud.analisis import leer_entero
 from latido.salud.salida_smartctl import bits_activos, combinar_codigos
@@ -362,3 +362,54 @@ def test_numero_serie_se_lee_pero_no_sale_en_repr_ni_motivos(nvme_real):
 
 def test_numero_serie_ausente(nvme_real):
     assert analizar(nvme_real).numero_serie is None
+
+
+# --- B3: reglas con identificador, cifras clave y tabla ATA ---
+
+
+@pytest.mark.parametrize("archivo", sorted(p.name for p in FIXTURES.glob("*.json")))
+def test_cada_motivo_tiene_su_disparo_con_una_regla_de_la_tabla(archivo):
+    from latido.salud.reglas import POR_ID
+    from latido.sistema.lectura import cargar_fixture
+
+    informe = cargar_fixture(FIXTURES / archivo)
+    assert [d.motivo for d in informe.disparos] == informe.motivos
+    for disparo in informe.disparos:
+        if disparo.regla is not None:
+            assert disparo.regla in POR_ID and disparo.estado is POR_ID[disparo.regla].resultado
+
+
+def test_tabla_ata_de_sintetico_ata():
+    """sintetico_ata.json es inventado: no se midió en hardware."""
+    from latido.salud import AtributoAta
+    from latido.sistema.lectura import cargar_fixture
+
+    informe = cargar_fixture(FIXTURES / "sintetico_ata.json")
+    assert informe.tipo == "ata" and informe.estado is Estado.DESCONOCIDO
+    assert informe.atributos_ata[0] == AtributoAta(5, "Reallocated_Sector_Ct", 100, 100, 10, "0")
+    assert informe.atributos_ata[3] == AtributoAta(194, "Temperature_Celsius", 64, 50, 0, "36 (Min/Max 20/50)")
+    assert [d.regla for d in informe.disparos] == ["TIPO-SIN-ANALISIS"]
+
+
+def test_cifras_informativas_nunca_tienen_color():
+    from latido.salud.cifras import cifras_clave
+    from latido.sistema.lectura import cargar_fixture
+
+    for archivo in ("nvme_real.json", "sintetico_malo_combinado.json", "sintetico_solo_informativo.json"):
+        for cifra in cifras_clave(cargar_fixture(FIXTURES / archivo)):
+            if cifra.clave in ("horas", "escritos"):
+                assert cifra.informativa and cifra.estado is None, (archivo, cifra)
+
+
+def test_en_una_cifra_gana_el_peor_estado():
+    from latido.salud import Disparo, InformeSalud
+    from latido.salud.cifras import cifras_clave
+
+    informe = InformeSalud(temperatura=95, errores_medio=0)
+    informe.disparos = [Disparo("NVME-TIEMPO-CRITICO", Estado.PRECAUCION, "x", "temperatura"),
+                        Disparo("NVME-AC-RESERVA", Estado.MALO, "y", "temperatura")]
+    estados = {c.clave: c.estado for c in cifras_clave(informe)}
+    assert estados["temperatura"] is Estado.MALO
+    assert estados["errores"] is Estado.BUENO
+    assert estados["vida"] is None  # sin dato
+
