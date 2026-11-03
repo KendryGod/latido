@@ -1,5 +1,6 @@
 """docs/velocidad.md y el README dicen lo mismo que el código."""
 
+import re
 from pathlib import Path
 
 from latido.velocidad import formato
@@ -49,3 +50,18 @@ def test_valores_documentados():
 def test_readme_pide_fio_y_libaio():
     assert "fio fio-engine-libaio" in README
     assert "docs/velocidad.md" in README
+
+
+def test_el_comando_para_probar_en_btrfs_nombra_todas_las_pruebas_de_velocidad():
+    """Cada archivo que nombra existe, y no falta ninguno de Velocidad ni de los simuladores."""
+    seccion = DOC.split("## Probar en btrfs", 1)[1]
+    nombrados = set(re.findall(r"tests/test_[a-z_]+\.py", seccion))
+    for archivo in nombrados:
+        assert (RAIZ / archivo).is_file(), archivo
+    de_velocidad = {
+        f"tests/{ruta.name}" for patron in ("test_*velocidad*.py", "test_simulador_*.py")
+        for ruta in (RAIZ / "tests").glob(patron)
+    }
+    assert de_velocidad - {"tests/test_documentacion_velocidad.py"} <= nombrados
+    assert "D=$(mktemp -d ~/.cache/latido-dev-btrfs-XXXXXXXX)" in seccion
+    assert 'python3 -m pytest -q -p no:cacheprovider --basetemp="$D/suite"' in seccion

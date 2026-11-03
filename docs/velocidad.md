@@ -176,6 +176,12 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   `shutil.rmtree`. Si en el directorio aparece algo que Latido no creó, o si su
   archivo tiene otro nombre o se movió, no lo borra y lo dice; si otro programa
   ya lo había borrado, también lo dice.
+- Si `rmdir` no puede borrar el directorio, la limpieza **siempre** lo dice y
+  nunca lo da por borrado; si no puede ver qué quedó dentro, también lo dice.
+  Para listar lo que quedó, Latido abre el directorio en ese momento: en btrfs
+  (medido con el kernel 7.2.14) un descriptor de carpeta no ve lo que se creó
+  después de abrirlo, y el que Latido abrió al crear el directorio no vería
+  nada de lo que fio o un intruso dejaron dentro.
 - Una sola prueba a la vez.
 - Cerrar la ventana en plena prueba pide confirmación; al confirmar, Latido
   cancela, limpia y luego cierra.
@@ -221,3 +227,21 @@ medición, o hasta escribir el archivo completo si era la preparación.
 - **Red** (nfs, nfs4, cifs, smb3, fuse.sshfs): el resultado incluye la red.
 - Si fio falla (por ejemplo, porque el sistema de archivos no acepta O_DIRECT),
   Latido muestra el mensaje real de fio, sin adivinar la causa.
+
+## Probar en btrfs
+
+Las pruebas usan la carpeta temporal de pytest, dentro de `/tmp` salvo que
+cambies `TMPDIR`. Si tu `/tmp` es tmpfs, no prueban btrfs, que lista las
+carpetas de otra forma (ver la regla de oro). Para correrlas en btrfs, usa una
+carpeta nueva en un sistema de archivos btrfs, por ejemplo en `~/.cache` si tu
+`/home` lo es (el `stat` de abajo lo dice). Esto no está en la CI.
+
+```
+D=$(mktemp -d ~/.cache/latido-dev-btrfs-XXXXXXXX)
+stat -f -c %T "$D"    # debe decir btrfs
+python3 -m pytest -q -p no:cacheprovider --basetemp="$D/velocidad" tests/test_regla_de_oro_velocidad.py tests/test_velocidad_limpieza.py tests/test_velocidad_restos.py tests/test_velocidad_carpeta.py tests/test_velocidad_fio.py tests/test_velocidad_pruebas.py tests/test_gui_velocidad.py tests/test_simulador_inodos.py tests/test_simulador_listado.py
+python3 -m pytest -q -p no:cacheprovider --basetemp="$D/suite"
+```
+
+Las dos deben terminar sin fallos. pytest no borra esa carpeta: bórrala
+cuando termines.

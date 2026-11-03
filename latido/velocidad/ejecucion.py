@@ -23,7 +23,10 @@ Regla de oro de esta pestaña:
   procesos de fio; se borra el archivo de prueba por su nombre exacto solo si
   sigue siendo el que Latido tiene abierto y tiene un solo nombre; luego el
   directorio con rmdir, y se cierran todos los descriptores. Nunca rm -r ni
-  shutil.rmtree.
+  shutil.rmtree. Si rmdir no puede borrar el directorio, la limpieza siempre
+  lo dice y nunca lo da por borrado. Para decir qué quedó dentro lo lista con
+  un descriptor abierto en ese momento: en btrfs (medido con el kernel
+  7.2.14) un descriptor de carpeta no ve lo que se creó después de abrirlo.
 - Excepción: si la preparación no terminó bien (se canceló, fio falló o dejó
   algo que no sirve), Latido todavía no tiene el archivo abierto y no puede
   comparar su identidad. Entonces borra lo que haya en la ruta solo si fio
@@ -82,11 +85,13 @@ class Limpieza:
 
     @property
     def completa(self):
-        return not self.problemas
+        """Sale de lo que de verdad se borró, nunca de «no hubo avisos»: solo si la carpeta temporal no se
+        llegó a crear o se borró (rmdir solo borra una carpeta vacía), y además no hubo ningún problema."""
+        return (not self.creo_directorio or self.directorio_borrado) and not self.problemas
 
     def texto(self):
-        if self.problemas:
-            return "La limpieza quedó incompleta:\n" + "\n".join(self.problemas)
+        if not self.completa:
+            return "La limpieza quedó incompleta:\n" + "\n".join(self.problemas or ["No se borró la carpeta temporal."])
         if not self.creo_directorio:
             return "No se llegó a crear ningún archivo."
         if self.archivo_borrado:
@@ -497,37 +502,70 @@ class Ejecucion:
         except OSError as error:
             limpieza.problemas.append(f"No se pudo revisar {self.directorio}: {error.strerror}.")
             return
-        mismo = self._identidad_directorio is None or (info.st_dev, info.st_ino) == self._identidad_directorio
-        if not stat.S_ISDIR(info.st_mode) or not mismo:
+        identidad = self._identidad_directorio or (info.st_dev, info.st_ino)
+        if not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != identidad:
             limpieza.problemas.append(f"{self.directorio} ya no es la carpeta que creó Latido; no se borró.")
             return
         try:
             os.rmdir(nombre, dir_fd=self._fd_padre)
             limpieza.directorio_borrado = True
         except OSError as error:
-            if error.errno in (errno.ENOTEMPTY, errno.EEXIST) and self._fd_directorio is not None:
-                quedan = sorted(os.listdir(self._fd_directorio))
-                propios = [nombre for nombre in quedan if self._es_el_archivo_de_latido(nombre)]
-                ajenos = [nombre for nombre in quedan if nombre not in propios]
-                if ajenos:
-                    limpieza.problemas.append(
-                        f"No se borró {self.directorio}: quedaron archivos que Latido no creó ({', '.join(ajenos)}). "
-                        "Revísalos tú."
-                    )
-                if propios:
-                    limpieza.problemas.append(
-                        f"No se borró {self.directorio}: dentro sigue el archivo de prueba de Latido "
-                        f"({', '.join(propios)})."
-                    )
+            if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                limpieza.problemas += self._que_quedo(nombre, identidad)  # siempre al menos un aviso
             else:
                 limpieza.problemas.append(f"No se pudo borrar {self.directorio}: {error.strerror}.")
 
-    def _es_el_archivo_de_latido(self, nombre):
-        """Si ese nombre del directorio temporal es el archivo de prueba de Latido, que quedó sin borrar."""
+    def _que_quedo(self, nombre, identidad):
+        """Avisos de por qué rmdir no pudo borrar la carpeta temporal: qué quedó dentro, o por qué no se sabe.
+
+        Lista con un descriptor abierto en este momento, no con el que se abrió al crear la carpeta: en btrfs
+        (medido con el kernel 7.2.14) un descriptor de carpeta no ve lo que se creó después de abrirlo.
+        """
+        no_se_ve = f"No se borró {self.directorio}: no está vacía, pero Latido no pudo ver qué hay dentro"
+        try:
+            carpeta = os.open(
+                nombre, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self._fd_padre
+            )
+        except OSError as error:
+            return [f"{no_se_ve} ({error.strerror}). Revísala tú."]
+        try:
+            info = os.fstat(carpeta)
+            if (info.st_dev, info.st_ino) != identidad:
+                return [
+                    f"No se borró {self.directorio}: no estaba vacía, y lo que hay ahora en esa ruta ya no es la "
+                    "carpeta que creó Latido. Revísala tú."
+                ]
+            quedan = sorted(os.listdir(carpeta))
+            propios = [entrada for entrada in quedan if self._es_el_archivo_de_latido(entrada, carpeta)]
+        except OSError as error:
+            return [f"{no_se_ve} ({error.strerror}). Revísala tú."]
+        finally:
+            try:
+                os.close(carpeta)
+            except OSError:
+                pass  # como en _cerrar_descriptores: no queda nada que hacer con ese descriptor
+        if not quedan:
+            return [f"{no_se_ve}. Revísala tú."]
+        avisos = []
+        ajenos = [entrada for entrada in quedan if entrada not in propios]
+        if ajenos:
+            avisos.append(
+                f"No se borró {self.directorio}: quedaron archivos que Latido no creó ({', '.join(ajenos)}). "
+                "Revísalos tú."
+            )
+        if propios:
+            avisos.append(
+                f"No se borró {self.directorio}: dentro sigue el archivo de prueba de Latido ({', '.join(propios)})."
+            )
+        return avisos
+
+    def _es_el_archivo_de_latido(self, nombre, carpeta):
+        """Si ese nombre de la carpeta temporal (abierta en carpeta) es el archivo de prueba de Latido, que quedó
+        sin borrar."""
         if self._fd_archivo is None:
             return nombre == ARCHIVO_PRUEBA and self._archivo_sigue
         try:
-            info = os.stat(nombre, dir_fd=self._fd_directorio, follow_symlinks=False)
+            info = os.stat(nombre, dir_fd=carpeta, follow_symlinks=False)
             propio = os.fstat(self._fd_archivo)
         except OSError:
             return False

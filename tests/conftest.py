@@ -302,3 +302,93 @@ def reutilizar_inodos(monkeypatch):
     monkeypatch.setattr(os, "lstat", simulador.lstat)
     monkeypatch.setattr(os, "fstat", simulador.fstat)
     return simulador
+
+
+# --- Simulador del listado de carpetas de btrfs ---
+
+OPEN_REAL, LISTDIR_REAL, LSEEK_REAL, CLOSE_REAL = os.open, os.listdir, os.lseek, os.close
+
+
+class SimuladorListado:
+    """Imita lo que se midió en btrfs con el kernel 7.2.14: os.listdir(fd)
+    devuelve la carpeta como estaba al abrir ese descriptor, o en su última
+    llamada a os.listdir o a os.lseek. Lo borrado desaparece enseguida; lo
+    creado, lo vuelto a crear con el mismo nombre o lo renombrado después no
+    aparece hasta la llamada siguiente. Un descriptor abierto después lo ve
+    todo. En tmpfs todo aparece al momento.
+
+    Solo afecta a os.listdir con un descriptor de carpeta abierto con os.open
+    mientras el simulador está activo; con una ruta, la lista está al día.
+    Distingue cada entrada por (nombre, número de inodo): si un sistema de
+    archivos repitiera el número al volver a crear un nombre, el simulador la
+    mostraría antes que btrfs. Para saber qué hay de verdad abre la carpeta
+    otra vez, así que también sirve si las pruebas corren en btrfs.
+    """
+
+    def __init__(self):
+        self._fotos = {}  # descriptor -> ((st_dev, st_ino) de la carpeta, {(nombre, ino) visibles})
+
+    @staticmethod
+    def _ahora(descriptor):
+        """[(nombre, ino)] de lo que hay de verdad, en el orden de os.listdir, con un descriptor nuevo."""
+        nuevo = OPEN_REAL(".", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=descriptor)
+        try:
+            entradas = []
+            for nombre in LISTDIR_REAL(nuevo):
+                try:
+                    entradas.append((nombre, STAT_REAL(nombre, dir_fd=nuevo, follow_symlinks=False).st_ino))
+                except FileNotFoundError:
+                    pass  # lo borraron entre el listado y el stat
+            return entradas
+        finally:
+            CLOSE_REAL(nuevo)
+
+    def _fotografiar(self, descriptor):
+        info = FSTAT_REAL(descriptor)
+        self._fotos[descriptor] = ((info.st_dev, info.st_ino), set(self._ahora(descriptor)))
+
+    def open(self, ruta, flags, mode=0o777, *, dir_fd=None):
+        descriptor = OPEN_REAL(ruta, flags, mode, dir_fd=dir_fd)
+        self._fotos.pop(descriptor, None)
+        try:
+            es_carpeta = stat.S_ISDIR(FSTAT_REAL(descriptor).st_mode)
+        except OSError:
+            es_carpeta = False
+        if es_carpeta:
+            self._fotografiar(descriptor)
+        return descriptor
+
+    def listdir(self, ruta="."):
+        foto = self._fotos.get(ruta) if isinstance(ruta, int) else None
+        if foto is None:
+            return LISTDIR_REAL(ruta)
+        info = FSTAT_REAL(ruta)
+        if (info.st_dev, info.st_ino) != foto[0]:  # ese número de descriptor ya es otra cosa
+            del self._fotos[ruta]
+            return LISTDIR_REAL(ruta)
+        ahora = self._ahora(ruta)
+        visibles = [nombre for nombre, ino in ahora if (nombre, ino) in foto[1]]
+        self._fotos[ruta] = (foto[0], set(ahora))  # la llamada siguiente ya lo ve
+        return visibles
+
+    def lseek(self, descriptor, posicion, desde):
+        resultado = LSEEK_REAL(descriptor, posicion, desde)
+        if descriptor in self._fotos:
+            self._fotografiar(descriptor)
+        return resultado
+
+    def close(self, descriptor):
+        self._fotos.pop(descriptor, None)
+        CLOSE_REAL(descriptor)
+
+
+@pytest.fixture
+def listar_como_btrfs(monkeypatch):
+    """SimuladorListado. No es autouse: solo lo usan las pruebas que lo piden, y
+    monkeypatch lo deshace al terminar cada una."""
+    simulador = SimuladorListado()
+    monkeypatch.setattr(os, "open", simulador.open)
+    monkeypatch.setattr(os, "listdir", simulador.listdir)
+    monkeypatch.setattr(os, "lseek", simulador.lseek)
+    monkeypatch.setattr(os, "close", simulador.close)
+    return simulador

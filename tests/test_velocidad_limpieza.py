@@ -4,6 +4,7 @@ Todo con el fio falso (tests/fio_falso.py) en tmp_path. La cancelación es
 real: el fio falso duerme con un proceso hijo y Latido detiene el grupo entero.
 """
 
+import errno
 import os
 import threading
 import time
@@ -12,9 +13,17 @@ import pytest
 
 from conftest import FIXTURES_FIO, StatvfsFalso, descriptores_hacia, vivo
 from latido.velocidad.carpeta import revisar_carpeta
-from latido.velocidad.ejecucion import Cancelado, Ejecucion, ErrorVelocidad
+from latido.velocidad.ejecucion import Cancelado, Ejecucion, ErrorVelocidad, Limpieza
 from latido.velocidad.herramientas import EstadoFio
-from latido.velocidad.pruebas import MIB, PRUEBAS, Configuracion, Direccion, Paso
+from latido.velocidad.pruebas import (
+    ARCHIVO_PRUEBA,
+    MIB,
+    PREFIJO_DIRECTORIO,
+    PRUEBAS,
+    Configuracion,
+    Direccion,
+    Paso,
+)
 
 
 @pytest.fixture
@@ -213,3 +222,123 @@ def test_reproduce_las_salidas_reales_de_fio(carpeta, fio_falso):
     assert resultado.resumen(PRUEBAS[3], Direccion.ESCRITURA).promedio == 78766272
     assert _vacia(carpeta)
     assert descriptores_hacia(carpeta) == []
+
+
+# --- Si la carpeta temporal no se pudo borrar, el aviso siempre dice la verdad ---
+
+INCOMPLETA = "La limpieza quedó incompleta:\n"
+
+
+def _limpieza_de(ejecucion):
+    """La limpieza de una prueba, haya terminado bien o con un error."""
+    try:
+        return ejecucion.ejecutar().limpieza
+    except ErrorVelocidad as error:
+        return error.limpieza
+
+
+@pytest.mark.parametrize("modos, avisos", [
+    (["ok", "ensucia"], lambda ej: [
+        f"No se borró {ej.directorio}: quedaron archivos que Latido no creó (extra.txt). Revísalos tú.",
+    ]),
+    (["ok", "enlace_duro", "ok"], lambda ej: [
+        f"{ej.archivo} tiene 2 nombres (alguien le hizo un enlace duro); Latido no lo borró.",
+        f"No se borró {ej.directorio}: dentro sigue el archivo de prueba de Latido ({ARCHIVO_PRUEBA}).",
+    ]),
+    (["enlaza"], lambda ej: [
+        f"En {ej.archivo} hay algo que no es el archivo de prueba de Latido; no se borró.",
+        f"No se borró {ej.directorio}: quedaron archivos que Latido no creó ({ARCHIVO_PRUEBA}). Revísalos tú.",
+    ]),
+], ids=["algo-ajeno", "su-archivo-con-dos-nombres", "un-enlace-sin-descriptor"])
+def test_el_aviso_no_usa_un_descriptor_abierto_antes_de_que_apareciera_lo_que_quedo(
+    carpeta, tmp_path, fio_falso, listar_como_btrfs, modos, avisos
+):
+    """Con el simulador, un descriptor de carpeta no ve lo que apareció después de abrirlo, como en btrfs.
+    Latido abre la carpeta temporal al crearla, antes de todo lo que queda dentro: si listara con ese
+    descriptor, el aviso no diría qué quedó y esta prueba fallaría."""
+    fio_falso.configurar(modos, enlace=str(tmp_path / "fuera.txt"), destino=str(tmp_path / "segundo-nombre.dat"))
+    ej = _ejecucion(carpeta, fio_falso)
+    limpieza = _limpieza_de(ej)
+    assert limpieza.problemas == avisos(ej)
+    assert not limpieza.directorio_borrado and not limpieza.completa
+    assert limpieza.texto() == INCOMPLETA + "\n".join(avisos(ej))
+    assert descriptores_hacia(carpeta) == []
+
+
+def test_si_no_puede_ver_que_quedo_lo_dice_y_no_la_da_por_borrada(carpeta, fio_falso, monkeypatch):
+    """Independiente del listado: si rmdir no pudo borrar la carpeta temporal, siempre hay un aviso."""
+    listar = os.listdir
+    monkeypatch.setattr(os, "listdir", lambda ruta=".": [] if isinstance(ruta, int) else listar(ruta))
+    fio_falso.configurar(["ok", "ensucia"])
+    ej = _ejecucion(carpeta, fio_falso)
+    limpieza = ej.ejecutar().limpieza
+    aviso = f"No se borró {ej.directorio}: no está vacía, pero Latido no pudo ver qué hay dentro. Revísala tú."
+    assert limpieza.problemas == [aviso]
+    assert limpieza.archivo_borrado and not limpieza.directorio_borrado and not limpieza.completa
+    assert limpieza.texto() == INCOMPLETA + aviso
+    assert os.listdir(ej.directorio) == ["extra.txt"]  # la carpeta sigue ahí, con lo ajeno
+    assert descriptores_hacia(carpeta) == []
+
+
+@pytest.mark.parametrize("cambio", ["otra-carpeta", "no-se-puede-abrir"])
+def test_si_la_carpeta_cambia_al_ir_a_revisarla_lo_dice_y_no_lista_otra(
+    carpeta, tmp_path, fio_falso, monkeypatch, cambio
+):
+    """Cuando rmdir falla, Latido abre la carpeta temporal para ver qué quedó, comprueba con fstat que es la
+    que creó (mismo st_dev y st_ino) y cierra ese descriptor pase lo que pase."""
+    otra = tmp_path / "otra"
+    otra.mkdir()
+    (otra / "señuelo.txt").write_text("no listar", encoding="utf-8")
+    abrir, borrar_carpeta = os.open, os.rmdir
+    rmdir_intentado = []
+
+    def rmdir_espia(ruta, *resto, **opciones):
+        if os.fsdecode(ruta).startswith(PREFIJO_DIRECTORIO):
+            rmdir_intentado.append(ruta)
+        return borrar_carpeta(ruta, *resto, **opciones)
+
+    def open_despues_de_rmdir(ruta, flags, mode=0o777, *, dir_fd=None):
+        if rmdir_intentado and os.fsdecode(ruta).startswith(PREFIJO_DIRECTORIO):
+            if cambio == "no-se-puede-abrir":
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), ruta)
+            return abrir(otra, flags, mode)
+        return abrir(ruta, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "rmdir", rmdir_espia)
+    monkeypatch.setattr(os, "open", open_despues_de_rmdir)
+    fio_falso.configurar(["ok", "ensucia"])
+    ej = _ejecucion(carpeta, fio_falso)
+    limpieza = ej.ejecutar().limpieza
+    if cambio == "otra-carpeta":
+        aviso = (
+            f"No se borró {ej.directorio}: no estaba vacía, y lo que hay ahora en esa ruta ya no es la carpeta "
+            "que creó Latido. Revísala tú."
+        )
+    else:
+        aviso = (
+            f"No se borró {ej.directorio}: no está vacía, pero Latido no pudo ver qué hay dentro "
+            f"({os.strerror(errno.ENOENT)}). Revísala tú."
+        )
+    assert limpieza.problemas == [aviso]
+    assert not limpieza.directorio_borrado and not limpieza.completa
+    assert descriptores_hacia(carpeta) == [] and descriptores_hacia(otra) == []
+
+
+@pytest.mark.parametrize("limpieza, completa, texto", [
+    (Limpieza(), True, "No se llegó a crear ningún archivo."),
+    (Limpieza(creo_directorio=True, archivo_borrado=True, directorio_borrado=True), True,
+     "Se borraron el archivo de prueba y su carpeta temporal."),
+    (Limpieza(creo_directorio=True, archivo_borrado_por_otro=True, directorio_borrado=True), True,
+     "Se borró la carpeta temporal; el archivo de prueba ya lo había borrado otro programa."),
+    (Limpieza(creo_directorio=True, directorio_borrado=True), True,
+     "Se borró la carpeta temporal; el archivo de prueba no llegó a crearse."),
+    (Limpieza(creo_directorio=True, archivo_borrado=True), False, INCOMPLETA + "No se borró la carpeta temporal."),
+    (Limpieza(creo_directorio=True), False, INCOMPLETA + "No se borró la carpeta temporal."),
+    (Limpieza(creo_directorio=True, archivo_borrado=True, directorio_borrado=True, problemas=["fio sigue activo."]),
+     False, INCOMPLETA + "fio sigue activo."),
+], ids=["nada-creado", "todo-borrado", "archivo-borrado-por-otro", "archivo-sin-crear",
+        "carpeta-sin-borrar-y-sin-avisos", "nada-borrado-y-sin-avisos", "con-avisos"])
+def test_completa_y_texto_salen_de_lo_que_de_verdad_se_borro(limpieza, completa, texto):
+    """Nunca de «no hubo avisos»: sin la carpeta temporal borrada, la limpieza no está completa."""
+    assert limpieza.completa is completa
+    assert limpieza.texto() == texto
