@@ -290,3 +290,38 @@ def test_solo_revisa_la_ultima_carpeta_usada(gtk, tmp_path, carpeta):
     guardar_ultima_carpeta(str(carpeta))
     pagina = _abrir_pestana(_ventana(_servicios()))
     assert not pagina.banner.get_revealed()
+
+
+def test_al_salir_de_la_app_se_detiene_fio_y_se_espera_la_limpieza(gtk, carpeta, fio_falso):
+    """Lo que hace Aplicacion.do_shutdown (por ejemplo, con Ctrl+C en la terminal)."""
+    GLib, _ = gtk
+    fio_falso.configurar(["ok", "duerme"])
+    pagina = _abrir_pestana(_ventana(_servicios(fio_falso)))
+    pagina.elegir_carpeta(str(carpeta))
+    pagina.boton.emit("clicked")
+    principal, hijo = _esperar_que_duerma(GLib, fio_falso)
+    pagina.detener_y_esperar(20)  # bloquea hasta que el hilo de la prueba termina de limpiar
+    assert not pagina._hilo.is_alive()
+    assert not vivo(principal) and not vivo(hijo)
+    assert os.listdir(carpeta) == []
+
+
+def test_la_aplicacion_detiene_cada_ventana_al_salir(gtk, monkeypatch):
+    from gi.repository import Adw
+
+    from latido.ui.aplicacion import Aplicacion
+
+    llamadas = []
+
+    class Pagina:
+        def detener_y_esperar(self):
+            llamadas.append("detener")
+
+    class Ventana:
+        pagina_velocidad = Pagina()
+
+    aplicacion = Aplicacion(ruta_fixture="x")
+    monkeypatch.setattr(aplicacion, "get_windows", lambda: [Ventana(), Ventana()])
+    monkeypatch.setattr(Adw.Application, "do_shutdown", lambda self: llamadas.append("adw"))
+    Aplicacion.do_shutdown(aplicacion)
+    assert llamadas == ["detener", "detener", "adw"]  # primero limpia, luego el cierre normal
