@@ -41,12 +41,12 @@ bueno, precaucion, malo o desconocido.
 %pyproject_save_files latido
 install -Dpm 0755 helper/latido-helper %{buildroot}%{_libexecdir}/latido/latido-helper
 install -Dpm 0644 data/io.github.kendrygod.latido.policy %{buildroot}%{_datadir}/polkit-1/actions/io.github.kendrygod.latido.policy
-install -Dpm 0644 data/io.github.kendrygod.Latido.desktop %{buildroot}%{_datadir}/applications/io.github.kendrygod.Latido.desktop
-install -Dpm 0644 data/io.github.kendrygod.Latido.metainfo.xml %{buildroot}%{_metainfodir}/io.github.kendrygod.Latido.metainfo.xml
+install -Dpm 0644 data/io.github.kendrygod.latido.desktop %{buildroot}%{_datadir}/applications/io.github.kendrygod.latido.desktop
+install -Dpm 0644 data/io.github.kendrygod.latido.metainfo.xml %{buildroot}%{_metainfodir}/io.github.kendrygod.latido.metainfo.xml
 
 %check
-desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.kendrygod.Latido.desktop
-appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.kendrygod.Latido.metainfo.xml
+desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.kendrygod.latido.desktop
+appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.kendrygod.latido.metainfo.xml
 
 %files -f %{pyproject_files}
 %license LICENSE
@@ -55,8 +55,8 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.kendrygod.L
 %dir %{_libexecdir}/latido
 %{_libexecdir}/latido/latido-helper
 %{_datadir}/polkit-1/actions/io.github.kendrygod.latido.policy
-%{_datadir}/applications/io.github.kendrygod.Latido.desktop
-%{_metainfodir}/io.github.kendrygod.Latido.metainfo.xml
+%{_datadir}/applications/io.github.kendrygod.latido.desktop
+%{_metainfodir}/io.github.kendrygod.latido.metainfo.xml
 
 %changelog
 * Mon Nov 02 2026 Kendry - 0.0.1-1

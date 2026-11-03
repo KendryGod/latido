@@ -8,7 +8,7 @@ from latido.sistema.discos import Disco, ErrorDeteccion, listar_discos
 from latido.sistema.lectura import cargar_fixture, leer_salud
 from latido.ui.ventana import VentanaPrincipal
 
-ID_APLICACION = "io.github.kendrygod.Latido"
+ID_APLICACION = "io.github.kendrygod.latido"
 
 
 def disco_de_fixture(ruta):

@@ -46,6 +46,11 @@ python3 -m pytest                        # pruebas
   `/usr/bin/smartctl --json=c -x <disco>`; nada más.
 - La app no pide contraseña al abrirse: solo al pulsar "Leer salud".
 
+## Identificadores
+
+- Aplicación: `io.github.kendrygod.latido` (archivos `.desktop` y `.metainfo.xml` en `data/`).
+- Acción de polkit: `io.github.kendrygod.latido.leer-salud`.
+
 ## Licencia
 
 GPL-3.0-or-later. Ver [LICENSE](LICENSE).

@@ -31,6 +31,6 @@ jobs:
 
       - name: Validar desktop, metainfo y política
         run: |
-          desktop-file-validate data/io.github.kendrygod.Latido.desktop
-          appstreamcli validate --no-net data/io.github.kendrygod.Latido.metainfo.xml
+          desktop-file-validate data/io.github.kendrygod.latido.desktop
+          appstreamcli validate --no-net data/io.github.kendrygod.latido.metainfo.xml
           xmllint --noout --nonet --dtdvalid /usr/share/polkit-1/policyconfig-1.dtd data/io.github.kendrygod.latido.policy
