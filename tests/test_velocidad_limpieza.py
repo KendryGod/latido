@@ -373,6 +373,19 @@ def test_si_fio_se_lanzo_y_no_hay_archivo_no_afirma_que_no_llego_a_crearse(carpe
     assert descriptores_hacia(carpeta) == []
 
 
+def test_si_al_terminar_la_preparacion_no_esta_el_archivo_no_afirma_que_fio_no_lo_creo(carpeta, fio_falso):
+    """Con «borra», el fio falso crea el archivo y lo borra: Latido no puede saber cuál de las dos cosas pasó."""
+    fio_falso.configurar(["borra"])
+    with pytest.raises(ErrorVelocidad) as error:
+        _ejecucion(carpeta, fio_falso).ejecutar()
+    assert error.value.mensaje == (
+        "Al terminar la preparación no estaba el archivo de prueba (fio no lo creó, o lo borró otro programa)."
+    )
+    assert len(fio_falso.invocaciones()) == 1
+    assert _vacia(carpeta)
+    assert descriptores_hacia(carpeta) == []
+
+
 def test_si_fio_no_llego_a_lanzarse_el_archivo_no_llego_a_crearse(carpeta, fio_falso):
     def falla_antes_de_lanzar_fio(progreso):
         if progreso.indice == 0 and not progreso.terminado:

@@ -159,7 +159,9 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   Si en la ruta no hay nada y fio llegó a lanzarse, Latido no sabe si fio
   llegó a crear el archivo y dice: «no había archivo de prueba (fio no llegó a
   crearlo, o lo borró otro programa)». Solo dice «no llegó a crearse» si fio
-  nunca se lanzó.
+  nunca se lanzó. Por lo mismo, si al terminar la preparación no está el
+  archivo, el error dice «no estaba el archivo de prueba (fio no lo creó, o lo
+  borró otro programa)», sin afirmar cuál de las dos cosas pasó.
   Modelo de amenaza: el directorio lo creó Latido con modo 0700, estaba vacío
   al crearse y antes de lanzar fio se comprobó que ese nombre no existía; en
   un sistema de archivos local, solo tu usuario o root pueden alterar lo que

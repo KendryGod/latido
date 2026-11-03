@@ -360,7 +360,9 @@ class Ejecucion:
         """Al terminar la preparación: abre el archivo que creó fio y lo mantiene abierto hasta la limpieza."""
         info = self._en_la_ruta()
         if info is None:
-            raise ErrorVelocidad("fio terminó la preparación sin crear el archivo de prueba.")
+            raise ErrorVelocidad(
+                "Al terminar la preparación no estaba el archivo de prueba (fio no lo creó, o lo borró otro programa)."
+            )
         if not stat.S_ISREG(info.st_mode):
             raise ErrorVelocidad("Lo que quedó en la ruta del archivo de prueba no es un archivo normal.")
         if info.st_size != self.configuracion.tamano:
