@@ -130,9 +130,25 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
 - fio escribe **solo** `latido-velocidad.dat` dentro de un directorio **nuevo**
   `.latido-velocidad-XXXXXXXX` que Latido crea con `tempfile.mkdtemp` (modo
   0700) dentro de la carpeta elegida. Nunca `--filename` a un dispositivo ni a
-  un archivo que ya existía: el directorio recién creado debe estar vacío, y
-  antes de cada paso Latido comprueba que el directorio y el archivo siguen
-  siendo los suyos (mismo dispositivo e inodo, sin enlaces simbólicos).
+  un archivo que ya existía: el directorio recién creado debe estar vacío.
+- Latido mantiene **abiertos** el directorio, desde que lo crea, y el archivo,
+  desde que termina la preparación (con `O_RDONLY|O_NONBLOCK|O_NOFOLLOW`, no
+  `O_PATH`). **Antes y después de cada paso** compara lo que tiene abierto
+  (`os.fstat`) con lo que hay en la ruta, sin seguir enlaces simbólicos: mismo
+  dispositivo e inodo, **un solo nombre** (`st_nlink` = 1) y el tamaño pedido.
+  Si algo no cuadra, se detiene y dice qué pasó: lo borraron, lo movieron, en
+  su lugar hay otra cosa o alguien le hizo un enlace duro.
+- Por qué abierto: un sistema de archivos puede darle a un archivo nuevo el
+  número de inodo de uno recién borrado. En la CI (run 41575524354) pasó así;
+  en tmpfs y btrfs no pasó en 200 intentos. Mientras Latido tenga el archivo
+  abierto, el archivo sigue existiendo aunque lo borren (man 2 unlink) y su
+  número no puede ser el de otro archivo del mismo sistema de archivos
+  (man 7 inode), así que un reemplazo siempre se nota.
+- Durante la preparación el archivo todavía no está abierto: lo está creando
+  fio. Si la prueba se cancela o falla en ese paso, la limpieza borra el
+  archivo normal con un solo nombre que haya en su ruta, porque solo puede ser
+  el que fio estaba creando (el directorio es 0700: solo tu usuario o root
+  pueden poner otra cosa ahí).
 - Carpetas rechazadas: que no existen, que no son carpetas, sin permiso de
   escritura, montadas solo para lectura, en un sistema de archivos virtual del
   kernel, o cuya ruta real queda dentro de `/dev`, `/proc` o `/sys`. También
@@ -142,9 +158,12 @@ sufijos cambian de significado con `kb_base`. El tiempo va en segundos
   "Reserved keywords", línea 453).
 - Al terminar, fallar, cancelar, cerrar la ventana o salir de la aplicación:
   Latido detiene el grupo de procesos de fio (SIGTERM, 10 s de espera, SIGKILL),
-  borra **solo** `latido-velocidad.dat` por su nombre exacto y luego el
-  directorio con `rmdir`. Nunca `rm -r` ni `shutil.rmtree`. Si en el directorio
-  aparece algo que Latido no creó, no lo borra y lo dice.
+  borra **solo** `latido-velocidad.dat` por su nombre exacto (y solo si sigue
+  siendo el archivo que tiene abierto y tiene un solo nombre), luego el
+  directorio con `rmdir`, y cierra todos sus descriptores. Nunca `rm -r` ni
+  `shutil.rmtree`. Si en el directorio aparece algo que Latido no creó, o si su
+  archivo tiene otro nombre o se movió, no lo borra y lo dice; si otro programa
+  ya lo había borrado, también lo dice.
 - Una sola prueba a la vez.
 - Cerrar la ventana en plena prueba pide confirmación; al confirmar, Latido
   cancela, limpia y luego cierra.
