@@ -47,3 +47,55 @@ empieza por `SINTETICO-`.
 | `sintetico_precaucion_combinada.json`    | temperatura, medio, repuesto, vida y temp. crítica | PRECAUCION      |
 | `sintetico_malo_combinado.json`          | bits 2 y 3 + temp. crítica + errores de medio      | MALO            |
 | `sintetico_solo_informativo.json`        | datos que solo se muestran, con valores altos      | BUENO           |
+
+## fio/
+
+Salidas reales de **fio 3.40** (fio-3.40-3.fc44 y fio-engine-libaio-3.40-3.fc44)
+en Fedora 44, kernel 7.2.14, tomadas **una sola vez** el 2026-11-02 con el
+ejecutor de Latido (`latido/velocidad/ejecucion.py`), en un directorio creado
+con `mktemp -d -p ~/.cache/latido-dev` (btrfs en el disco del sistema, no
+tmpfs). Tamaño de prueba: 64 MiB, 1 pasada. Al terminar, Latido borró su
+archivo y su carpeta, y luego se borraron `$D` y `~/.cache/latido-dev` con
+`rmdir`.
+
+Comandos exactos que ejecutó Latido (`$D` = el directorio de `mktemp`):
+
+```
+/usr/bin/fio --output-format=json --eta=never --name=latido-preparar --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=write --bs=1048576 --iodepth=8 --numjobs=1 --size=67108864
+/usr/bin/fio --output-format=json --eta=never --readonly --name=latido-seq1m-q8t1-lectura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=read --bs=1048576 --iodepth=8 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --name=latido-seq1m-q8t1-escritura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=write --bs=1048576 --iodepth=8 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --readonly --name=latido-seq1m-q1t1-lectura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=read --bs=1048576 --iodepth=1 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --name=latido-seq1m-q1t1-escritura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=write --bs=1048576 --iodepth=1 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --readonly --name=latido-rnd4k-q32t1-lectura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=randread --bs=4096 --iodepth=32 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --name=latido-rnd4k-q32t1-escritura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=randwrite --bs=4096 --iodepth=32 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --readonly --name=latido-rnd4k-q1t1-lectura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=randread --bs=4096 --iodepth=1 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+/usr/bin/fio --output-format=json --eta=never --name=latido-rnd4k-q1t1-escritura --filename=$D/.latido-velocidad-ikhzhhkw/latido-velocidad.dat --ioengine=libaio --direct=1 --rw=randwrite --bs=4096 --iodepth=1 --numjobs=1 --size=67108864 --runtime=5 --allow_file_create=0
+```
+
+Las 9 terminaron con código 0 y stderr vacío. Cada `latido-*.json` es la
+salida estándar tal cual, con **una sola sustitución**: en
+`job options.filename` el comienzo de la ruta (la carpeta de `mktemp`, que
+contenía el nombre de usuario) se cambió por `/RUTA-REDACTADA`. No traen el
+nombre del equipo ni `disk_util`. La prueba de datos personales revisa todos
+los archivos de esta carpeta (rutas personales, usuario y equipo).
+
+Consultas sin E/S (`env -i LC_ALL=C`), guardadas tal cual:
+
+| Archivo                       | Comando                                    | Código |
+|-------------------------------|--------------------------------------------|--------|
+| `version.stdout`              | `/usr/bin/fio --version`                   | 0      |
+| `enghelp_libaio.stdout`       | `/usr/bin/fio --enghelp=libaio`            | 0      |
+| `enghelp_inexistente.stdout` y `.stderr` | `/usr/bin/fio --enghelp=motor_que_no_existe` | 1 |
+
+### Sintéticos de fio
+
+Inventados para probar errores. **No son salidas reales de fio.**
+
+| Archivo                       | Caso                                               |
+|-------------------------------|----------------------------------------------------|
+| `sintetico_truncado.txt`      | la primera mitad de `latido-seq1m-q8t1-lectura.json` |
+| `sintetico_json_invalido.txt` | texto que no es JSON                               |
+| `sintetico_error_fio.stderr`  | mensaje de error inventado (se prueba con código 1) |
+| `sintetico_jobs_vacio.json`   | `"jobs": []`                                       |
+| `sintetico_sin_jobs.json`     | falta la clave `jobs`                              |
+| `sintetico_otro_trabajo.json` | solo un trabajo con otro nombre                    |

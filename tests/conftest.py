@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "smartctl"
+FIXTURES_FIO = Path(__file__).parent / "fixtures" / "fio"
 
 
 def cargar(nombre):

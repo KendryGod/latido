@@ -1,0 +1,16 @@
+{
+  "_sintetico": "solo trae un trabajo con otro nombre",
+  "fio version": "fio-3.40",
+  "jobs": [
+    {
+      "jobname": "otro-trabajo",
+      "error": 0,
+      "read": {
+        "io_bytes": 4096,
+        "bw_bytes": 4096000,
+        "iops": 1000.0,
+        "runtime": 1
+      }
+    }
+  ]
+}

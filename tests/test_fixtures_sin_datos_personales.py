@@ -1,6 +1,8 @@
-"""Ningún fixture puede traer datos que identifiquen una unidad concreta."""
+"""Ningún fixture puede traer datos que identifiquen una unidad concreta ni a su dueño."""
 
+import getpass
 import json
+import socket
 from pathlib import Path
 
 import pytest
@@ -75,3 +77,48 @@ def test_ignora_valores_vacios_y_argv():
         "nguid": {},
     }
     assert buscar_identificadores(limpio) == []
+
+
+# --- Salidas de fio: rutas personales, usuario y nombre del equipo ---
+
+CARPETA_FIO = CARPETA_FIXTURES / "fio"
+RUTAS_PERSONALES = ("/home/", "/var/home/", "/root/", "/run/user/", "/tmp/", "/media/", "/mnt/", "/.cache/")
+RUTA_REDACTADA = "/RUTA-REDACTADA/"
+
+
+def datos_personales_en_texto(texto, usuario=None, equipo=None):
+    hallados = [ruta for ruta in RUTAS_PERSONALES if ruta in texto]
+    for nombre in (usuario, equipo):
+        if nombre and len(nombre) >= 3 and nombre not in ("root", "localhost") and nombre in texto:
+            hallados.append(nombre)
+    return hallados
+
+
+ARCHIVOS_FIO = sorted(p for p in CARPETA_FIO.iterdir() if p.is_file())
+
+
+def test_hay_salidas_de_fio():
+    assert len(ARCHIVOS_FIO) >= 9
+
+
+@pytest.mark.parametrize("archivo", ARCHIVOS_FIO, ids=lambda p: p.name)
+def test_salida_de_fio_sin_rutas_usuario_ni_equipo(archivo):
+    texto = archivo.read_text(encoding="utf-8")
+    assert datos_personales_en_texto(texto, getpass.getuser(), socket.gethostname()) == []
+
+
+def test_filename_de_fio_redactado():
+    reales = sorted(CARPETA_FIO.glob("latido-*.json"))
+    assert len(reales) == 9
+    for archivo in reales:
+        for trabajo in json.loads(archivo.read_text(encoding="utf-8"))["jobs"]:
+            assert trabajo["job options"]["filename"].startswith(RUTA_REDACTADA), archivo.name
+
+
+def test_detecta_rutas_usuario_y_equipo():
+    assert datos_personales_en_texto('{"filename": "/home/ana/x"}') == ["/home/"]
+    assert datos_personales_en_texto("/var/home/ana/.cache/x") == ["/home/", "/var/home/", "/.cache/"]
+    assert datos_personales_en_texto("hecho por ana en pc-de-ana", usuario="ana", equipo="pc-de-ana") == [
+        "ana", "pc-de-ana"
+    ]
+    assert datos_personales_en_texto("root en localhost", usuario="root", equipo="localhost") == []

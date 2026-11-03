@@ -1,0 +1,8 @@
+userspace_reap          : Use alternative user-space reap implementation
+nowait                  : Set RWF_NOWAIT for reads/writes
+libaio_vectored         : Use libaio {preadv,pwritev} instead of libaio {pread,pwrite}
+cmdprio_percentage      : Send high priority I/O this percentage of the time
+cmdprio_class           : Set asynchronous IO priority class
+cmdprio_hint            : Set asynchronous IO priority hint
+cmdprio                 : Set asynchronous IO priority level
+cmdprio_bssplit         : Set priority percentages for different block sizes
