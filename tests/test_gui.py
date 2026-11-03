@@ -85,21 +85,67 @@ def test_pestana_salud(gtk):
     assert pagina.get_title() == "Salud"
 
 
-@pytest.mark.parametrize("archivo, texto, clase", [
-    ("nvme_real.json", "BUENO", "accent"),
-    ("sintetico_precaucion.json", "PRECAUCIÓN", "warning"),
-    ("sintetico_malo.json", "MALO", "error"),
-    ("sintetico_desconocido.json", "DESCONOCIDO", "dim-label"),
-    ("nvme_sin_root.json", "DESCONOCIDO", "dim-label"),
+CLASES_DE_ESTADO = {"latido-bueno", "latido-precaucion", "latido-malo", "latido-desconocido"}
+
+
+@pytest.mark.parametrize("archivo, texto, clase, icono", [
+    ("nvme_real.json", "BUENO", "latido-bueno", "object-select-symbolic"),
+    ("sintetico_precaucion.json", "PRECAUCIÓN", "latido-precaucion", "dialog-warning-symbolic"),
+    ("sintetico_malo.json", "MALO", "latido-malo", "dialog-error-symbolic"),
+    ("sintetico_desconocido.json", "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic"),
+    ("nvme_sin_root.json", "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic"),
 ])
-def test_estado_con_clase_de_libadwaita(gtk, archivo, texto, clase):
+def test_cada_estado_aplica_su_clase_icono_y_texto(gtk, archivo, texto, clase, icono):
     pagina = _ventana([_disco()], lambda disco: None).pagina_salud
     pagina.mostrar_informe(cargar_fixture(FIXTURES / archivo))
     assert pagina.etiqueta_estado.get_text() == texto
-    clases = set(pagina.etiqueta_estado.get_css_classes())
-    assert clase in clases
-    otras = {"accent", "warning", "error", "dim-label"} - {clase}
-    assert not clases & otras
+    assert set(pagina.insignia.get_css_classes()) & CLASES_DE_ESTADO == {clase}
+    assert pagina.icono_estado.get_visible()
+    assert pagina.icono_estado.get_icon_name() == icono
+
+
+def test_cambiar_de_estado_no_acumula_clases(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "sintetico_malo.json"))
+    pagina.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"))
+    assert set(pagina.insignia.get_css_classes()) & CLASES_DE_ESTADO == {"latido-bueno"}
+
+
+def test_sin_leer_la_insignia_es_neutra(gtk):
+    pagina = _ventana([_disco()], lambda disco: None).pagina_salud
+    assert not set(pagina.insignia.get_css_classes()) & CLASES_DE_ESTADO
+    assert not pagina.icono_estado.get_visible()
+
+
+def test_iconos_existen_en_el_tema(gtk):
+    from gi.repository import Gdk
+
+    from latido.ui.pagina_salud import APARIENCIA
+
+    tema = gtk[1].IconTheme.get_for_display(Gdk.Display.get_default())
+    for _, _, icono, _ in APARIENCIA.values():
+        assert tema.has_icon(icono), icono
+
+
+def test_css_sin_errores_y_con_colores_de_libadwaita(gtk):
+    from gi.repository import Gio
+
+    from latido.ui import estilo
+
+    hoja = Gio.resources_lookup_data("/org/gnome/Adwaita/styles/gtk.css", 0).get_data().decode()
+    assert estilo.COLORES_USADOS == ["blue_3", "dark_1", "dark_4", "light_1", "red_3", "yellow_5"]
+    for nombre in estilo.COLORES_USADOS:
+        assert f"@define-color {nombre} " in hoja, nombre
+    estilo._pantallas_con_estilo.clear()
+    assert estilo.cargar_estilo() == []
+
+
+def test_un_css_roto_si_se_detecta(gtk):
+    proveedor = gtk[1].CssProvider()
+    errores = []
+    proveedor.connect("parsing-error", lambda _p, _s, error: errores.append(error.message))
+    proveedor.load_from_string(".x { color: ; }")
+    assert errores
 
 
 def test_resumen_y_registro_del_fixture_real(gtk):
@@ -155,7 +201,7 @@ def test_error_no_deja_datos_viejos(gtk):
         pagina.boton.emit("clicked")
         _esperar(GLib, lambda: not pagina.leyendo)
     assert pagina.etiqueta_estado.get_text() == "DESCONOCIDO"
-    assert "dim-label" in pagina.etiqueta_estado.get_css_classes()
+    assert "latido-desconocido" in pagina.insignia.get_css_classes()
     assert not pagina.grupo_resumen.get_visible()
     assert not pagina.grupo_registro.get_visible()
     assert pagina._filas_registro == []

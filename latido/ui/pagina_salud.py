@@ -8,14 +8,19 @@ from gi.repository import Adw, GLib, Gtk
 from latido.salud import Estado, formato
 from latido.sistema.lectura import ErrorLectura, TipoError
 
-# Estado: (texto, clase de libadwaita, frase)
+# Estado: (texto, clase de latido/ui/estilo.py, ícono simbólico, frase).
+# El ícono y el texto hacen que el color no sea la única señal.
 APARIENCIA = {
-    Estado.BUENO: ("BUENO", "accent", "Sin señales de daño en los datos SMART."),
-    Estado.PRECAUCION: ("PRECAUCIÓN", "warning", "Hay señales de riesgo. Revisa los motivos."),
-    Estado.MALO: ("MALO", "error", "El disco reporta fallas. Mejor evítalo."),
-    Estado.DESCONOCIDO: ("DESCONOCIDO", "dim-label", "No hay datos suficientes para opinar."),
+    Estado.BUENO: ("BUENO", "latido-bueno", "object-select-symbolic", "Sin señales de daño en los datos SMART."),
+    Estado.PRECAUCION: (
+        "PRECAUCIÓN", "latido-precaucion", "dialog-warning-symbolic", "Hay señales de riesgo. Revisa los motivos."
+    ),
+    Estado.MALO: ("MALO", "latido-malo", "dialog-error-symbolic", "El disco reporta fallas. Mejor evítalo."),
+    Estado.DESCONOCIDO: (
+        "DESCONOCIDO", "latido-desconocido", "dialog-question-symbolic", "No hay datos suficientes para opinar."
+    ),
 }
-CLASES_ESTADO = [clase for _, clase, _ in APARIENCIA.values()]
+CLASES_ESTADO = [clase for _, clase, _, _ in APARIENCIA.values()]
 
 FILAS_RESUMEN = [
     ("vida", "Vida restante"),
@@ -102,19 +107,25 @@ class PaginaSalud(Gtk.ScrolledWindow):
         caja.append(fila_selector)
 
         self.aviso = Gtk.Label(xalign=0, wrap=True, visible=False)
-        self.aviso.add_css_class("dim-label")
+        self.aviso.add_css_class("dimmed")
         caja.append(self.aviso)
 
         # Panel grande de estado.
-        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         panel.add_css_class("card")
-        self.etiqueta_estado = Gtk.Label(margin_top=24)
+        self.insignia = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER, margin_top=24)
+        self.insignia.add_css_class("latido-insignia")
+        self.icono_estado = Gtk.Image(pixel_size=32, visible=False)
+        self.etiqueta_estado = Gtk.Label()
         self.etiqueta_estado.add_css_class("title-1")
+        self.insignia.append(self.icono_estado)
+        self.insignia.append(self.etiqueta_estado)
+        panel.append(self.insignia)
         self.etiqueta_frase = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
         self.etiqueta_frase.add_css_class("title-4")
         self.etiqueta_disco = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, margin_bottom=24)
-        self.etiqueta_disco.add_css_class("dim-label")
-        for etiqueta in (self.etiqueta_estado, self.etiqueta_frase, self.etiqueta_disco):
+        self.etiqueta_disco.add_css_class("dimmed")
+        for etiqueta in (self.etiqueta_frase, self.etiqueta_disco):
             etiqueta.set_margin_start(18)
             etiqueta.set_margin_end(18)
             panel.append(etiqueta)
@@ -142,7 +153,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
         caja.append(self.grupo_registro)
 
         nota = Gtk.Label(label=NOTA, wrap=True, xalign=0)
-        nota.add_css_class("dim-label")
+        nota.add_css_class("dimmed")
         nota.add_css_class("caption")
         caja.append(nota)
 
@@ -164,7 +175,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
     def _al_cambiar_disco(self, *_):
         disco = self.disco_seleccionado()
         self._limpiar()
-        self._poner_estado("—", "dim-label", "Elige un disco y pulsa «Leer salud».")
+        self._poner_estado("—", "Elige un disco y pulsa «Leer salud».")
         self.etiqueta_disco.set_text(disco.etiqueta if disco else "")
         habilitado = disco is not None and disco.habilitado
         self.boton.set_sensitive(habilitado and not self.leyendo)
@@ -175,7 +186,7 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self._limpiar()
         self.selector.set_sensitive(False)
         self.boton.set_sensitive(False)
-        self._poner_estado("—", "dim-label", mensaje)
+        self._poner_estado("—", mensaje)
         self.etiqueta_disco.set_text("")
 
     # --- lectura en un hilo ---
@@ -189,7 +200,9 @@ class PaginaSalud(Gtk.ScrolledWindow):
         self.selector.set_sensitive(False)
         self.spinner.set_visible(True)
         self._limpiar()
-        self._poner_estado("Leyendo…", "dim-label", "Si se abre la ventana de contraseña, es para leer: Latido no escribe en el disco.")
+        self._poner_estado(
+            "Leyendo…", "Si se abre la ventana de contraseña, es para leer: Latido no escribe en el disco."
+        )
         threading.Thread(target=self._leer_en_hilo, args=(disco,), daemon=True).start()
 
     def _leer_en_hilo(self, disco):
@@ -218,11 +231,17 @@ class PaginaSalud(Gtk.ScrolledWindow):
 
     # --- mostrar resultados ---
 
-    def _poner_estado(self, texto, clase, frase):
-        for etiqueta in (self.etiqueta_estado, self.etiqueta_frase):
-            for otra in CLASES_ESTADO:
-                etiqueta.remove_css_class(otra)
-            etiqueta.add_css_class(clase)
+    def _poner_estado(self, texto, frase, estado=None):
+        """Sin estado (antes de leer o leyendo) la insignia queda neutra y sin ícono."""
+        for clase in CLASES_ESTADO:
+            self.insignia.remove_css_class(clase)
+        if estado is None:
+            self.icono_estado.set_visible(False)
+        else:
+            _, clase, icono, _ = APARIENCIA[estado]
+            self.insignia.add_css_class(clase)
+            self.icono_estado.set_from_icon_name(icono)
+            self.icono_estado.set_visible(True)
         self.etiqueta_estado.set_text(texto)
         self.etiqueta_frase.set_text(frase)
 
@@ -245,15 +264,14 @@ class PaginaSalud(Gtk.ScrolledWindow):
 
     def mostrar_error(self, error, disco=None):
         self._limpiar()
-        texto, clase, _ = APARIENCIA[Estado.DESCONOCIDO]
-        self._poner_estado(texto, clase, "No se pudo leer el disco.")
+        self._poner_estado(APARIENCIA[Estado.DESCONOCIDO][0], "No se pudo leer el disco.", Estado.DESCONOCIDO)
         self.etiqueta_disco.set_text(disco.etiqueta if disco else "")
         self._agregar_motivos(error.mensaje.split("\n"))
 
     def mostrar_informe(self, informe, disco=None):
         self._limpiar()
-        texto, clase, frase = APARIENCIA[informe.estado]
-        self._poner_estado(texto, clase, frase)
+        texto, _, _, frase = APARIENCIA[informe.estado]
+        self._poner_estado(texto, frase, informe.estado)
 
         descripcion = [informe.modelo or (disco.modelo if disco else None) or "Modelo no disponible"]
         if informe.capacidad is not None:
