@@ -14,7 +14,7 @@ from gi.repository import Gdk, Gtk
 CSS = """
 .latido-insignia {
   border-radius: 12px;
-  padding: 10px 24px;
+  padding: 12px 24px;
 }
 .latido-bueno {
   background-color: @blue_3;

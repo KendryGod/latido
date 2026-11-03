@@ -37,6 +37,21 @@ def test_estados_sin_clases_de_color_de_libadwaita():
         assert clase not in texto, clase
 
 
+def test_dimmed_y_nunca_dim_label():
+    """libadwaita 1.9: la clase es .dimmed; .dim-label es la vieja."""
+    for archivo in CODIGO:
+        assert "dim-label" not in archivo.read_text(encoding="utf-8"), archivo
+
+
+def test_espacios_del_css_en_multiplos_de_6():
+    """docs/diseno.md: todos los espacios y radios del CSS propio son múltiplos de 6 px."""
+    from latido.ui.estilo import CSS
+
+    medidas = [int(numero) for numero in re.findall(r"(\d+)px", CSS)]
+    assert medidas
+    assert [m for m in medidas if m % 6] == []
+
+
 def test_sin_marca_ajena():
     prohibida = "crys" + "tal"
     for archivo in RAIZ.rglob("*"):
