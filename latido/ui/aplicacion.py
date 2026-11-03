@@ -56,3 +56,12 @@ class Aplicacion(Adw.Application):
     def do_activate(self):
         ventana = self.get_active_window() or crear_ventana(self, self.ruta_fixture)
         ventana.present()
+
+    def do_shutdown(self):
+        # Si la app se cierra con una prueba de velocidad en marcha (por ejemplo,
+        # Ctrl+C en la terminal), se detiene fio y se limpia antes de salir.
+        for ventana in self.get_windows():
+            pagina = getattr(ventana, "pagina_velocidad", None)
+            if pagina is not None:
+                pagina.detener_y_esperar()
+        Adw.Application.do_shutdown(self)

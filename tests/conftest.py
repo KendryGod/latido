@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,43 @@ def estado_aislado(tmp_path_factory, monkeypatch):
 
 
 # --- Pantalla para las pruebas de interfaz ---
+
+def _hay_pantalla():
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Gdk", "4.0")
+    from gi.repository import Gdk, Gtk
+
+    Gtk.init_check()
+    return Gdk.Display.get_default() is not None
+
+
+@pytest.fixture(scope="module")
+def gtk():
+    """Con Gdk.Display.get_default() real. Sin pantalla: se salta con motivo; con REQUIRE_DISPLAY=1, falla."""
+    if not _hay_pantalla():
+        motivo = "Sin pantalla: Gdk.Display.get_default() devolvió None"
+        if os.environ.get("REQUIRE_DISPLAY") == "1":
+            pytest.fail(motivo + " y REQUIRE_DISPLAY=1")
+        pytest.skip(motivo)
+    import gi
+
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, GLib, Gtk
+
+    Adw.init()
+    return GLib, Gtk
+
+
+def esperar(GLib, condicion, segundos=5):
+    contexto = GLib.MainContext.default()
+    limite = time.monotonic() + segundos
+    while not condicion() and time.monotonic() < limite:
+        contexto.iteration(False)
+        time.sleep(0.01)
+    while contexto.pending():
+        contexto.iteration(False)
 
 
 # --- fio falso (tests/fio_falso.py) ---

@@ -1,46 +1,17 @@
 """Pruebas de la interfaz.
 
 Se comprueba la pantalla con Gdk.Display.get_default() real, no con la
-variable DISPLAY. Sin pantalla, se saltan con motivo; con REQUIRE_DISPLAY=1
-fallan en vez de saltar. Las ventanas no se muestran (no se llama present).
+variable DISPLAY (fixture gtk en conftest.py). Sin pantalla, se saltan con
+motivo; con REQUIRE_DISPLAY=1 fallan en vez de saltar. Las ventanas no se
+muestran (no se llama present).
 """
-
-import os
-import time
 
 import pytest
 
-from conftest import FIXTURES
+from conftest import FIXTURES, esperar
 from latido.salud import Estado
 from latido.sistema.discos import AVISO_SD, Disco
 from latido.sistema.lectura import ErrorLectura, TipoError, cargar_fixture
-
-
-def _hay_pantalla():
-    import gi
-
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Gdk", "4.0")
-    from gi.repository import Gdk, Gtk
-
-    Gtk.init_check()
-    return Gdk.Display.get_default() is not None
-
-
-@pytest.fixture(scope="module")
-def gtk():
-    if not _hay_pantalla():
-        motivo = "Sin pantalla: Gdk.Display.get_default() devolvió None"
-        if os.environ.get("REQUIRE_DISPLAY") == "1":
-            pytest.fail(motivo + " y REQUIRE_DISPLAY=1")
-        pytest.skip(motivo)
-    import gi
-
-    gi.require_version("Adw", "1")
-    from gi.repository import Adw, GLib, Gtk
-
-    Adw.init()
-    return GLib, Gtk
 
 
 def _disco(**cambios):
@@ -56,16 +27,6 @@ def _ventana(discos, lector):
     from latido.ui.ventana import VentanaPrincipal
 
     return VentanaPrincipal(discos, lector)
-
-
-def _esperar(GLib, condicion, segundos=5):
-    contexto = GLib.MainContext.default()
-    limite = time.monotonic() + segundos
-    while not condicion() and time.monotonic() < limite:
-        contexto.iteration(False)
-        time.sleep(0.01)
-    while contexto.pending():
-        contexto.iteration(False)
 
 
 def test_al_abrir_no_lee_ni_pide_contrasena(gtk):
@@ -243,7 +204,7 @@ def test_lectura_en_hilo_y_resultado_con_idle_add(gtk):
     pagina.boton.emit("clicked")
     assert pagina.leyendo
     assert not pagina.boton.get_sensitive()
-    _esperar(GLib, lambda: not pagina.leyendo)
+    esperar(GLib, lambda: not pagina.leyendo)
     assert not pagina.leyendo
     assert pagina.etiqueta_estado.get_text() == "BUENO"
     assert pagina.boton.get_sensitive()
@@ -265,7 +226,7 @@ def test_error_no_deja_datos_viejos(gtk):
     pagina = _ventana([_disco()], lector).pagina_salud
     for _ in range(2):
         pagina.boton.emit("clicked")
-        _esperar(GLib, lambda: not pagina.leyendo)
+        esperar(GLib, lambda: not pagina.leyendo)
     assert pagina.etiqueta_estado.get_text() == "DESCONOCIDO"
     assert "latido-desconocido" in pagina.insignia.get_css_classes()
     assert not pagina.grupo_resumen.get_visible()
