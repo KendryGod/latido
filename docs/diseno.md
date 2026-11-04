@@ -35,10 +35,11 @@ cambia el color de salud.
   Acerca de y Salir (Ctrl+Q).
 - **Contenido:** centrado en un `Adw.Clamp` de 760 px, con desplazamiento vertical. Por debajo de 560 sp,
   las pestañas bajan a una barra inferior.
-- **Salud:**
-  - la tarjeta del veredicto: ícono grande, palabra en `.title-1`, una frase y «Por qué»;
-  - la autenticidad;
+- **Salud** (en este orden, el mismo que el del informe TXT):
+  - la tarjeta del veredicto: ícono grande, palabra en `.title-1` y una frase;
+  - «Por qué»: una línea por regla, con su ícono y su fuente;
   - seis cifras clave, cada una con su unidad y su estado;
+  - la autenticidad, aparte del color de salud;
   - «Todos los datos», plegado.
 - **Velocidad:** la configuración, un único botón primario (Iniciar/Cancelar), el progreso «Paso n de 8»
   con `Gtk.ProgressBar`, el mensaje del final (con la limpieza) y la rejilla de resultados: una fila por
