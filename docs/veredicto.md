@@ -48,7 +48,7 @@ Latido da dos respuestas separadas:
 | NVME-TEMP-ADVERTENCIA | temperatura compuesta >= umbral de advertencia del disco (WCTEMP) | Precaución (amarillo) | NVMe Base Specification 2.0c, figura 275, bytes 267:266 (WCTEMP) |
 | NVME-TEMP-CRITICA | temperatura compuesta >= umbral crítico del disco (CCTEMP) | Peligro (rojo) | NVMe Base Specification 2.0c, figura 275, bytes 269:268 (CCTEMP) |
 | NVME-ERRORES-MEDIO | media_errors > 0 | Precaución (amarillo) | SIN FUENTE |
-| NVME-TIEMPO-CRITICO | critical_comp_time > 0 (minutos en o sobre la temperatura crítica) | Precaución (amarillo) | SIN FUENTE |
+| NVME-TIEMPO-CRITICO | critical_comp_time > 0 (minutos por encima de la temperatura crítica) | Precaución (amarillo) | SIN FUENTE |
 | NVME-APAGADOS-INSEGUROS | unsafe_shutdowns: se muestra en «Todos los datos», nunca da color | Solo informa | NVMe Base Specification 2.0c, figura 207, bytes 159:144 |
 
 ## Lo que dicen las fuentes

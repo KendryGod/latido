@@ -80,7 +80,7 @@ REGLAS = (
     Regla("NVME-TEMP-CRITICA", "temperatura compuesta >= umbral crítico del disco (CCTEMP)", Estado.MALO,
           f"{NVME}, figura 275, bytes 269:268 (CCTEMP)", "temperatura"),
     Regla("NVME-ERRORES-MEDIO", "media_errors > 0", Estado.PRECAUCION, SIN_FUENTE, "errores"),
-    Regla("NVME-TIEMPO-CRITICO", "critical_comp_time > 0 (minutos en o sobre la temperatura crítica)",
+    Regla("NVME-TIEMPO-CRITICO", "critical_comp_time > 0 (minutos por encima de la temperatura crítica)",
           Estado.PRECAUCION, SIN_FUENTE, "temperatura"),
     # Solo informa.
     Regla("NVME-APAGADOS-INSEGUROS", "unsafe_shutdowns: se muestra en «Todos los datos», nunca da color", None,

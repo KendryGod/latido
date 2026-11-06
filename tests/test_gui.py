@@ -507,18 +507,18 @@ def test_cifra_temperatura_con_tiempo_critico_usa_espacio_no_separable_y_mantien
     assert set(tarjeta.chip.get_css_classes()) & CLASES_DE_ESTADO == {"latido-precaucion"}
     assert tarjeta.detalle.get_text() == (
         "Umbrales del disco: advertencia 80\u00a0°C · crítica 85\u00a0°C. "
-        "Pasó 37\u00a0min en o sobre el umbral crítico"
+        "Pasó 37\u00a0min por encima del umbral crítico"
     )
 
     log = base_sintetica["nvme_smart_health_information_log"]
     log["critical_comp_time"] = 1
     pagina.mostrar_informe(analizar(base_sintetica))
-    assert tarjeta.detalle.get_text().endswith("Pasó 1\u00a0min en o sobre el umbral crítico")
+    assert tarjeta.detalle.get_text().endswith("Pasó 1\u00a0min por encima del umbral crítico")
     assert set(tarjeta.chip.get_css_classes()) & CLASES_DE_ESTADO == {"latido-precaucion"}
 
     log["critical_comp_time"] = 1500
     pagina.mostrar_informe(analizar(base_sintetica))
-    assert tarjeta.detalle.get_text().endswith("Pasó 1,500\u00a0min en o sobre el umbral crítico")
+    assert tarjeta.detalle.get_text().endswith("Pasó 1,500\u00a0min por encima del umbral crítico")
     assert set(tarjeta.chip.get_css_classes()) & CLASES_DE_ESTADO == {"latido-precaucion"}
 
     log["temperature"] = 85
@@ -526,12 +526,12 @@ def test_cifra_temperatura_con_tiempo_critico_usa_espacio_no_separable_y_mantien
     pagina.mostrar_informe(analizar(base_sintetica))
     assert tarjeta.palabra.get_text() == "Peligro"
     assert set(tarjeta.chip.get_css_classes()) & CLASES_DE_ESTADO == {"latido-malo"}
-    assert tarjeta.detalle.get_text().endswith("Pasó 1,500\u00a0min en o sobre el umbral crítico")
+    assert tarjeta.detalle.get_text().endswith("Pasó 1,500\u00a0min por encima del umbral crítico")
 
     del log["temperature"]
     del base_sintetica["temperature"]
     pagina.mostrar_informe(analizar(base_sintetica))
     assert (tarjeta.valor.get_text(), tarjeta.palabra.get_text()) == ("—", "Sin dato")
     assert set(tarjeta.chip.get_css_classes()) & CLASES_DE_ESTADO == {"latido-desconocido"}
-    assert tarjeta.detalle.get_text().endswith("Pasó 1,500\u00a0min en o sobre el umbral crítico")
+    assert tarjeta.detalle.get_text().endswith("Pasó 1,500\u00a0min por encima del umbral crítico")
 

@@ -91,8 +91,8 @@ TODOS LOS DATOS
     Minutos que el disco ha pasado en o por encima de su temperatura de
     advertencia, sin llegar a la crítica.
   - Tiempo sobre temperatura crítica: 0 min
-    Minutos que el disco ha pasado en o por encima de su temperatura crítica. Si
-    es mayor que 0, Latido lo marca como PRECAUCIÓN.
+    Minutos que el disco ha pasado por encima de su temperatura crítica. Si es
+    mayor que 0, Latido lo marca como PRECAUCIÓN.
 
 VELOCIDAD
   Medida en: KINGSTON SNV2S1000G · 1.00 TB

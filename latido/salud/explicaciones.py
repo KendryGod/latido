@@ -135,7 +135,7 @@ CAMPOS = {
     ),
     "critical_comp_time": (
         "Tiempo sobre temperatura crítica",
-        "Minutos que el disco ha pasado en o por encima de su temperatura crítica. "
+        "Minutos que el disco ha pasado por encima de su temperatura crítica. "
         "Si es mayor que 0, Latido lo marca como PRECAUCIÓN.",
         _minutos,
     ),

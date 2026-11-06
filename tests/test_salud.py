@@ -301,7 +301,7 @@ def test_critical_comp_time_mayor_que_cero_es_precaucion(base_sintetica):
     _log(base_sintetica)["critical_comp_time"] = 1
     informe = analizar(base_sintetica)
     assert informe.estado is Estado.PRECAUCION
-    assert "El disco pasó 1 minutos en o por encima de su temperatura crítica." in informe.motivos
+    assert "El disco pasó 1 minutos por encima de su temperatura crítica." in informe.motivos
 
 
 def test_critical_comp_time_cero_no_cambia_nada(base_sintetica):
@@ -438,7 +438,7 @@ def test_cifra_temperatura_fria_con_tiempo_critico_explica_el_historial():
     assert (cifra.valor, cifra.unidad, cifra.estado) == ("41", "°C", Estado.PRECAUCION)
     assert cifra.detalle == (
         "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
-        "Pasó 37 min en o sobre el umbral crítico"
+        "Pasó 37 min por encima del umbral crítico"
     )
 
 
@@ -462,7 +462,7 @@ def test_cifra_temperatura_caliente_ahora_y_con_tiempo_critico_muestra_ambos(
     assert cifra.estado is estado_esperado is estado_sin_historial
     assert cifra.detalle == (
         "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
-        "Pasó 15 min en o sobre el umbral crítico"
+        "Pasó 15 min por encima del umbral crítico"
     )
 
 
@@ -503,14 +503,14 @@ def test_cifra_temperatura_desconocida_con_tiempo_critico(base_sintetica):
     assert cifra.estado is None
     assert cifra.detalle == (
         "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
-        "Pasó 12 min en o sobre el umbral crítico"
+        "Pasó 12 min por encima del umbral crítico"
     )
 
     del base_sintetica["nvme_composite_temperature_threshold"]
     cifra_sin_umbrales = _cifra_temperatura(analizar(base_sintetica))
     assert cifra_sin_umbrales.valor == "—"
     assert cifra_sin_umbrales.estado is None
-    assert cifra_sin_umbrales.detalle == "Pasó 12 min en o sobre el umbral crítico"
+    assert cifra_sin_umbrales.detalle == "Pasó 12 min por encima del umbral crítico"
 
 
 @pytest.mark.parametrize("minutos, texto_minutos", [(1, "1"), (1500, "1,500")])
@@ -520,7 +520,28 @@ def test_cifra_temperatura_formato_de_minutos_uno_y_miles(base_sintetica, minuto
     assert cifra.estado is Estado.PRECAUCION
     assert cifra.detalle == (
         "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
-        f"Pasó {texto_minutos} min en o sobre el umbral crítico"
+        f"Pasó {texto_minutos} min por encima del umbral crítico"
     )
+
+
+def test_contador_critico_dice_por_encima_y_advertencia_dice_en_o_por_encima():
+    import re
+    from pathlib import Path
+    from latido.salud import explicaciones
+
+    raiz = Path(__file__).resolve().parent.parent
+    este_archivo = Path(__file__).resolve()
+    patron_prohibido = re.compile(r"en o (sobre|por encima de) (su |la |el )?(temperatura|umbral) cr[ií]tic[ao]")
+    archivos = sorted(raiz.glob("latido/**/*.py")) + sorted(raiz.glob("docs/**/*.md"))
+    assert archivos
+    for archivo in archivos:
+        if archivo.resolve() == este_archivo:
+            continue
+        texto = archivo.read_text(encoding="utf-8")
+        assert not patron_prohibido.search(texto), f"{archivo.relative_to(raiz)} usa 'en o sobre/por encima' en crítico"
+
+    explicacion_advertencia = explicaciones.CAMPOS["warning_temp_time"][1]
+    assert "en o por encima de su temperatura de advertencia" in explicacion_advertencia
+
 
 

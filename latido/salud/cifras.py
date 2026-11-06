@@ -62,7 +62,7 @@ def _detalle_temperatura(informe):
     caliente_con_historial = REGLA_TIEMPO_CRITICO in reglas and bool(reglas & REGLAS_TEMPERATURA_ACTUAL)
     minutos = informe.minutos_temperatura_critica
     if (frio_con_historial or caliente_con_historial) and minutos is not None and minutos > 0:
-        partes.append(f"Pasó {_numero(minutos)} min en o sobre el umbral crítico")
+        partes.append(f"Pasó {_numero(minutos)} min por encima del umbral crítico")
     return ". ".join(partes) if partes else None
 
 

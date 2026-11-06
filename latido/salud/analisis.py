@@ -313,7 +313,7 @@ def _diagnosticar_nvme(informe, datos, mascara):
     if minutos_criticos is not None and minutos_criticos > 0:
         precauciones.append(_disparo(
             "NVME-TIEMPO-CRITICO",
-            f"El disco pasó {minutos_criticos:,} minutos en o por encima de su temperatura crítica.",
+            f"El disco pasó {minutos_criticos:,} minutos por encima de su temperatura crítica.",
         ))
 
     incompleto = bool(mascara & BIT_ORDEN_FALLIDA)
