@@ -20,6 +20,9 @@ ATAJOS = {
     "win.exportar": ["<Control>e"],
     "app.salir": ["<Control>q"],
 }
+AVISO_INFORME_GUARDADO = "Informe guardado."
+AVISO_RUTA_INVALIDA = "Elige una carpeta de un disco local."
+AVISO_TEXTO_INVALIDO = "No se pudo guardar el informe: hay caracteres que no se pueden escribir en texto."
 
 
 class VentanaPrincipal(Adw.ApplicationWindow):
@@ -132,21 +135,27 @@ class VentanaPrincipal(Adw.ApplicationWindow):
                 self.avisar(f"No se pudo usar el selector de archivos: {error.message}")
             return
         ruta = archivo.get_path() if archivo else None
-        if not ruta:
-            self.avisar("Elige una carpeta de un disco local.")
-            return
         self.guardar_informe(ruta, texto)
 
     def guardar_informe(self, ruta, texto):
+        if not ruta:
+            self.avisar(AVISO_RUTA_INVALIDA)
+            return False
         try:
             escribir_informe(ruta, texto)
         except ErrorExportar as error:
             self.avisar(str(error))
             return False
+        except UnicodeError:
+            self.avisar(AVISO_TEXTO_INVALIDO)
+            return False
+        except ValueError:
+            self.avisar(AVISO_RUTA_INVALIDA)
+            return False
         except OSError as error:
             self.avisar(f"No se pudo guardar el informe: {error.strerror}.")
             return False
-        self.avisar("Informe guardado.")
+        self.avisar(AVISO_INFORME_GUARDADO)
         return True
 
     def mostrar_acerca_de(self):
