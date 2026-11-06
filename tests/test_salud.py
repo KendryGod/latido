@@ -423,3 +423,104 @@ def test_en_una_cifra_gana_el_peor_estado():
     assert estados["errores"] is Estado.BUENO
     assert estados["vida"] is None  # sin dato
 
+
+def _cifra_temperatura(informe):
+    from latido.salud.cifras import cifras_clave
+
+    return next(c for c in cifras_clave(informe) if c.clave == "temperatura")
+
+
+def test_cifra_temperatura_fria_con_tiempo_critico_explica_el_historial():
+    informe = analizar(cargar("sintetico_temp_critica.json"))
+    reglas_temp = [d.regla for d in informe.disparos if d.cifra == "temperatura"]
+    assert reglas_temp == ["NVME-TIEMPO-CRITICO"]
+    cifra = _cifra_temperatura(informe)
+    assert (cifra.valor, cifra.unidad, cifra.estado) == ("41", "°C", Estado.PRECAUCION)
+    assert cifra.detalle == (
+        "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
+        "Pasó 37 min en o sobre el umbral crítico"
+    )
+
+
+@pytest.mark.parametrize("cambios, regla_actual, estado_esperado", [
+    ({"temperature": 80}, "NVME-TEMP-ADVERTENCIA", Estado.PRECAUCION),
+    ({"temperature": 85}, "NVME-TEMP-CRITICA", Estado.MALO),
+    ({"critical_warning": 0b10}, "NVME-AC-TEMPERATURA", Estado.PRECAUCION),
+])
+def test_cifra_temperatura_caliente_ahora_y_con_tiempo_critico_muestra_ambos(
+    base_sintetica, cambios, regla_actual, estado_esperado
+):
+    _log(base_sintetica).update(cambios)
+    if "temperature" in cambios:
+        base_sintetica["temperature"]["current"] = cambios["temperature"]
+    estado_sin_historial = _cifra_temperatura(analizar(base_sintetica)).estado
+    _log(base_sintetica)["critical_comp_time"] = 15
+    informe = analizar(base_sintetica)
+    reglas_temp = {d.regla for d in informe.disparos if d.cifra == "temperatura"}
+    assert {regla_actual, "NVME-TIEMPO-CRITICO"} <= reglas_temp
+    cifra = _cifra_temperatura(informe)
+    assert cifra.estado is estado_esperado is estado_sin_historial
+    assert cifra.detalle == (
+        "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
+        "Pasó 15 min en o sobre el umbral crítico"
+    )
+
+
+def test_cifra_temperatura_con_tiempo_critico_cero_o_ausente_no_agrega_frase(base_sintetica):
+    from latido.salud import Disparo
+
+    _log(base_sintetica)["critical_comp_time"] = 0
+    cifra_cero = _cifra_temperatura(analizar(base_sintetica))
+    assert cifra_cero.estado is Estado.BUENO
+    assert cifra_cero.detalle == "Umbrales del disco: advertencia 80 °C · crítica 85 °C"
+
+    del _log(base_sintetica)["critical_comp_time"]
+    cifra_ausente = _cifra_temperatura(analizar(base_sintetica))
+    assert cifra_ausente.estado is Estado.BUENO
+    assert cifra_ausente.detalle == "Umbrales del disco: advertencia 80 °C · crítica 85 °C"
+
+    _log(base_sintetica)["critical_comp_time"] = None
+    cifra_none = _cifra_temperatura(analizar(base_sintetica))
+    assert cifra_none.estado is Estado.BUENO
+    assert cifra_none.detalle == "Umbrales del disco: advertencia 80 °C · crítica 85 °C"
+
+    informe_cero = InformeSalud(
+        temperatura=41,
+        temperatura_advertencia=80,
+        temperatura_critica=85,
+        minutos_temperatura_critica=0,
+        disparos=[Disparo("NVME-TIEMPO-CRITICO", Estado.PRECAUCION, "x", "temperatura")],
+    )
+    assert _cifra_temperatura(informe_cero).detalle == "Umbrales del disco: advertencia 80 °C · crítica 85 °C"
+
+
+def test_cifra_temperatura_desconocida_con_tiempo_critico(base_sintetica):
+    del _log(base_sintetica)["temperature"]
+    del base_sintetica["temperature"]
+    _log(base_sintetica)["critical_comp_time"] = 12
+    cifra = _cifra_temperatura(analizar(base_sintetica))
+    assert cifra.valor == "—"
+    assert cifra.estado is None
+    assert cifra.detalle == (
+        "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
+        "Pasó 12 min en o sobre el umbral crítico"
+    )
+
+    del base_sintetica["nvme_composite_temperature_threshold"]
+    cifra_sin_umbrales = _cifra_temperatura(analizar(base_sintetica))
+    assert cifra_sin_umbrales.valor == "—"
+    assert cifra_sin_umbrales.estado is None
+    assert cifra_sin_umbrales.detalle == "Pasó 12 min en o sobre el umbral crítico"
+
+
+@pytest.mark.parametrize("minutos, texto_minutos", [(1, "1"), (1500, "1,500")])
+def test_cifra_temperatura_formato_de_minutos_uno_y_miles(base_sintetica, minutos, texto_minutos):
+    _log(base_sintetica)["critical_comp_time"] = minutos
+    cifra = _cifra_temperatura(analizar(base_sintetica))
+    assert cifra.estado is Estado.PRECAUCION
+    assert cifra.detalle == (
+        "Umbrales del disco: advertencia 80 °C · crítica 85 °C. "
+        f"Pasó {texto_minutos} min en o sobre el umbral crítico"
+    )
+
+

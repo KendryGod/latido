@@ -89,6 +89,7 @@ class InformeSalud:
     temperatura: int | None = None  # °C
     temperatura_advertencia: int | None = None  # °C, solo si el JSON la trae
     temperatura_critica: int | None = None  # °C, solo si el JSON la trae
+    minutos_temperatura_critica: int | None = None  # critical_comp_time (minutos)
     horas: int | None = None
     ciclos: int | None = None
     tb_escritos: float | None = None

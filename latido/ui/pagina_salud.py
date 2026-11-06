@@ -196,8 +196,8 @@ class TarjetaCifra(Gtk.Box):
         self.chip.add_css_class(clase)
         self.icono.set_from_icon_name(icono)
         self.palabra.set_text(palabra)
-        # Número y unidad no se separan al ajustar la línea («85 °C», «10 %»).
-        self.detalle.set_text(re.sub(r"(\d) (?=°C|%)", "\\1\u00a0", cifra.detalle or ""))
+        # Número y unidad no se separan al ajustar la línea («85 °C», «10 %», «37 min»).
+        self.detalle.set_text(re.sub(r"(\d) (?=°C|%|min\b)", "\\1\u00a0", cifra.detalle or ""))
         self.detalle.set_visible(bool(cifra.detalle))
 
 

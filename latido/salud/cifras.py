@@ -10,6 +10,12 @@ from latido.salud import formato
 from latido.salud.modelo import Estado
 
 SIN_VALOR = "—"
+REGLA_TIEMPO_CRITICO = "NVME-TIEMPO-CRITICO"
+REGLAS_TEMPERATURA_ACTUAL = frozenset({
+    "NVME-AC-TEMPERATURA",
+    "NVME-TEMP-ADVERTENCIA",
+    "NVME-TEMP-CRITICA",
+})
 
 
 @dataclass(frozen=True)
@@ -23,10 +29,14 @@ class Cifra:
     detalle: str | None
 
 
+def _disparos_de(informe, clave):
+    return [disparo for disparo in informe.disparos if disparo.cifra == clave]
+
+
 def _estado(informe, clave, valor):
     if valor is None:
         return None
-    estados = {disparo.estado for disparo in informe.disparos if disparo.cifra == clave}
+    estados = {disparo.estado for disparo in _disparos_de(informe, clave)}
     for peor in (Estado.MALO, Estado.PRECAUCION):
         if peor in estados:
             return peor
@@ -42,6 +52,20 @@ def _umbrales_temperatura(informe):
     return "Umbrales del disco: " + " · ".join(partes) if partes else None
 
 
+def _detalle_temperatura(informe):
+    partes = []
+    umbrales = _umbrales_temperatura(informe)
+    if umbrales is not None:
+        partes.append(umbrales)
+    reglas = {disparo.regla for disparo in _disparos_de(informe, "temperatura") if disparo.regla}
+    frio_con_historial = REGLA_TIEMPO_CRITICO in reglas and not (reglas & REGLAS_TEMPERATURA_ACTUAL)
+    caliente_con_historial = REGLA_TIEMPO_CRITICO in reglas and bool(reglas & REGLAS_TEMPERATURA_ACTUAL)
+    minutos = informe.minutos_temperatura_critica
+    if (frio_con_historial or caliente_con_historial) and minutos is not None and minutos > 0:
+        partes.append(f"Pasó {_numero(minutos)} min en o sobre el umbral crítico")
+    return ". ".join(partes) if partes else None
+
+
 def _numero(valor, decimales=0):
     if valor is None:
         return SIN_VALOR
@@ -52,7 +76,7 @@ def cifras_clave(informe):
     """Temperatura, vida usada, repuesto disponible, horas encendido, datos escritos y errores de medio."""
     filas = [
         ("temperatura", "Temperatura", informe.temperatura, _numero(informe.temperatura), "°C", False,
-         _umbrales_temperatura(informe)),
+         _detalle_temperatura(informe)),
         ("vida", "Vida usada", informe.uso_pct, _numero(informe.uso_pct), "%", False,
          None if informe.vida_pct is None else f"Estimación del propio disco. Queda {informe.vida_pct} %."),
         ("reserva", "Repuesto disponible", informe.repuesto_pct, _numero(informe.repuesto_pct), "%", False,

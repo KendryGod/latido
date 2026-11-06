@@ -159,6 +159,7 @@ def _leer_nvme(informe, datos):
     informe.temperatura_critica = _primero(
         leer_entero(umbrales, "critical"), leer_entero(temperatura, "critical_limit_max")
     )
+    informe.minutos_temperatura_critica = leer_entero(registro, "critical_comp_time")
 
     informe.horas = _primero(
         leer_entero(registro, "power_on_hours"), leer_entero(datos.get("power_on_time"), "hours")
@@ -308,7 +309,7 @@ def _diagnosticar_nvme(informe, datos, mascara):
 
     # Unidad: minutos (NVMe Base Specification 2.0c, figura 207). No es un
     # dato obligatorio para BUENO: si falta, no cambia el estado.
-    minutos_criticos = leer_entero(registro, "critical_comp_time")
+    minutos_criticos = informe.minutos_temperatura_critica
     if minutos_criticos is not None and minutos_criticos > 0:
         precauciones.append(_disparo(
             "NVME-TIEMPO-CRITICO",

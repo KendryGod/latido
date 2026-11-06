@@ -97,6 +97,14 @@ def test_contenido_de_referencia_con_el_fixture_real():
     assert texto == REFERENCIA.read_text(encoding="utf-8")
 
 
+def test_cifra_temperatura_en_txt_incluye_tiempo_en_umbral_critico():
+    texto = construir_texto(analizar(cargar("sintetico_temp_critica.json")), _disco(), fecha=FECHA)
+    assert "  Temperatura:          41 °C · Atención" in texto
+    assert "Umbrales del disco: advertencia 80 °C · crítica 85 °C." in texto
+    assert "Pasó 37 min en o sobre el umbral crítico" in texto
+
+
+
 def test_nunca_lleva_datos_personales(tmp_path):
     datos = cargar("nvme_real.json")
     datos["serial_number"] = SERIE  # solo en memoria
