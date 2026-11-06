@@ -12,6 +12,7 @@ Ejecuta exactamente:  /usr/bin/smartctl --json=c -x <disco>
 Escribe en stdout:    {"smartctl_exit": N, "datos": {...}}
 o, si smartctl no devolvió JSON válido:
                       {"smartctl_exit": N, "datos": null, "salida_invalida": true}
+(también se usa si el resultado no se puede escribir como UTF-8).
 
 Sale con 0 si smartctl llegó a ejecutarse, aunque el disco reporte problemas.
 Sus propios errores usan los códigos de abajo; nunca 126 ni 127, que pkexec
@@ -96,11 +97,22 @@ def ejecutar_smartctl(disco, run=None):
 
     try:
         datos = json.loads(proceso.stdout)
-    except ValueError:
+    except (ValueError, RecursionError):
         datos = None
     if not isinstance(datos, dict):
         return {"smartctl_exit": proceso.returncode, "datos": None, "salida_invalida": True}
     return {"smartctl_exit": proceso.returncode, "datos": datos}
+
+
+def serializar(resultado):
+    """Devuelve el resultado como texto JSON que se puede escribir en UTF-8,
+    o None si no se puede (sustituto suelto, anidamiento excesivo)."""
+    try:
+        texto = json.dumps(resultado, ensure_ascii=False)
+        texto.encode("utf-8")
+    except (ValueError, RecursionError):
+        return None
+    return texto
 
 
 def main(argv=None):
@@ -112,7 +124,10 @@ def main(argv=None):
     except ErrorHelper as error:
         print(f"latido-helper: {error.mensaje}", file=sys.stderr)
         return error.codigo
-    json.dump(resultado, sys.stdout, ensure_ascii=False)
+    texto = serializar(resultado)
+    if texto is None:
+        texto = serializar({"smartctl_exit": resultado["smartctl_exit"], "datos": None, "salida_invalida": True})
+    sys.stdout.write(texto)
     sys.stdout.write("\n")
     return SALIDA_OK
 

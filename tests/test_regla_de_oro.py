@@ -193,3 +193,129 @@ def test_dispositivo_inexistente(monkeypatch):
     monkeypatch.setattr(helper, "smartctl_disponible", lambda: True)
     assert helper.main(["leer", "/dev/nvme987654"]) == helper.SALIDA_DISPOSITIVO
     assert falso.llamadas == []
+
+
+# --- Robustez de la salida y de la ejecución ---------------------------------
+
+def test_serializar_texto_normal_conserva_unicode():
+    resultado = {"smartctl_exit": 0, "datos": {"modelo": "Ñandú ✓"}}
+    texto = helper.serializar(resultado)
+    assert json.loads(texto) == resultado
+    assert "Ñandú ✓" in texto
+
+
+def test_serializar_con_sustituto_suelto_devuelve_none():
+    assert helper.serializar({"smartctl_exit": 0, "datos": {"modelo": "DISCO\udcff"}}) is None
+
+
+def test_serializar_con_anidamiento_excesivo_devuelve_none():
+    anidado = []
+    for _ in range(100_000):
+        anidado = [anidado]
+    assert helper.serializar({"smartctl_exit": 0, "datos": anidado}) is None
+
+
+def test_sustituto_suelto_en_la_salida_no_rompe_el_ayudante(run_falso, capsys):
+    run_falso.stdout = b'{"modelo": "DISCO\\udcff"}'
+    run_falso.returncode = 4
+    assert helper.main(["leer", "/dev/nvme0"]) == 0
+    capturado = capsys.readouterr()
+    assert json.loads(capturado.out) == {"smartctl_exit": 4, "datos": None, "salida_invalida": True}
+    assert capturado.err == ""
+
+
+def test_json_muy_anidado_de_smartctl_es_salida_invalida(run_falso, capsys):
+    run_falso.stdout = b"[" * 100_000 + b"]" * 100_000
+    run_falso.returncode = 0
+    assert helper.main(["leer", "/dev/nvme0"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"smartctl_exit": 0, "datos": None, "salida_invalida": True}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        FileNotFoundError(2, "No such file or directory"),
+        PermissionError(13, "Permission denied"),
+        OSError(8, "Exec format error"),
+    ],
+    ids=["no-existe", "sin-permiso", "formato"],
+)
+def test_oserror_al_ejecutar_smartctl_sale_con_codigo_propio(monkeypatch, capsys, error):
+    def fallar(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(helper.subprocess, "run", fallar)
+    monkeypatch.setattr(helper, "smartctl_disponible", lambda: True)
+    monkeypatch.setattr(helper, "validar_dispositivo", lambda disco: None)
+    assert helper.main(["leer", "/dev/nvme0"]) == helper.SALIDA_EJECUCION
+    capturado = capsys.readouterr()
+    assert capturado.out == ""
+    assert "no se pudo ejecutar smartctl" in capturado.err
+    assert "Traceback" not in capturado.err
+
+
+def test_argumentos_de_subprocess_fijados(run_falso):
+    assert helper.main(["leer", "/dev/nvme0"]) == 0
+    [(_, kwargs)] = run_falso.llamadas
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.DEVNULL
+    assert kwargs["check"] is False
+
+
+RECHAZADOS_BORDE = [
+    ["leer", "/dev/nvme0\x00"],
+    ["leer", "/dev/nvme0\x00/dev/sda"],
+    ["leer", "/dev/nvme0 "],
+    ["leer", "/dev/nvme0\r"],
+    ["leer", "/dev/nvme0\t"],
+    ["leer", "/dev//nvme0"],
+    ["leer", "/dev/nvme0n"],
+    ["leer", "/dev/nvme0n1n2"],
+    ["leer", "/dev/nvme0n1p"],
+    ["leer", "/DEV/nvme0"],
+    ["leer", "/dev/NVME0"],
+    ["leer", ""],
+    ["leer /dev/nvme0"],
+    ["leer\n", "/dev/nvme0"],
+    [" leer", "/dev/nvme0"],
+    ["leer", "/dev/nvme0", ""],
+]
+
+
+@pytest.mark.parametrize("argv", RECHAZADOS_BORDE, ids=repr)
+def test_rechaza_argumentos_de_borde(argv, run_falso):
+    assert helper.main(argv) == helper.SALIDA_USO
+    assert run_falso.llamadas == []
+
+
+IMPORTS_PERMITIDOS = {"json", "os", "re", "stat", "subprocess", "sys"}
+ATRIBUTOS_PROHIBIDOS = {
+    "os": {"system", "popen", "write", "remove", "unlink", "rename", "replace", "chmod", "chown",
+           "mkdir", "makedirs", "rmdir", "truncate", "symlink", "link", "execv", "execve", "execvp",
+           "fork", "kill", "putenv", "environ"},
+    "subprocess": {"Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput"},
+    "sys": {"path", "modules"},
+}
+NOMBRES_PROHIBIDOS = {"open", "eval", "exec", "compile", "__import__", "input", "breakpoint"}
+
+
+def test_el_ayudante_no_escribe_ni_ejecuta_nada_mas_que_smartctl():
+    import ast
+
+    arbol = ast.parse(RUTA_HELPER.read_text(encoding="utf-8"))
+    importados = set()
+    problemas = []
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Import):
+            importados |= {alias.name.split(".")[0] for alias in nodo.names}
+        elif isinstance(nodo, ast.ImportFrom):
+            importados.add((nodo.module or "").split(".")[0])
+        elif isinstance(nodo, ast.Name) and nodo.id in NOMBRES_PROHIBIDOS:
+            problemas.append(f"linea {nodo.lineno}: nombre prohibido {nodo.id}")
+        elif isinstance(nodo, ast.Attribute) and isinstance(nodo.value, ast.Name):
+            if nodo.attr in ATRIBUTOS_PROHIBIDOS.get(nodo.value.id, ()):
+                problemas.append(f"linea {nodo.lineno}: {nodo.value.id}.{nodo.attr} prohibido")
+        elif isinstance(nodo, ast.keyword) and nodo.arg == "shell":
+            problemas.append(f"linea {nodo.value.lineno}: argumento shell prohibido")
+    assert importados <= IMPORTS_PERMITIDOS, f"importaciones no permitidas: {sorted(importados - IMPORTS_PERMITIDOS)}"
+    assert problemas == []
