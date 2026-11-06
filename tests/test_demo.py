@@ -22,6 +22,12 @@ def test_argumentos_demo_invalidos(argv):
         app.interpretar_argumentos(argv)
 
 
+def test_la_velocidad_de_ejemplo_es_del_disco_de_ejemplo():
+    from latido.sistema.ubicacion import mismo_disco
+
+    assert mismo_disco(demo.velocidad_demo().disco, demo.disco_demo())
+
+
 def test_los_mismos_estados_en_la_app_y_en_la_demo():
     assert app.ESTADOS_DEMO == demo.ESTADOS == ("sano", "precaucion", "peligro", "sin-datos")
 
@@ -83,6 +89,9 @@ def test_la_demo_funciona_sin_ejecutar_nada(gtk, sin_subprocesos, estado):
     assert celda.valor.get_text() != "—" and celda.latencia.get_text() != "—"
     texto = ventana.texto_del_informe()
     assert texto.splitlines()[1] == MARCA_DEMO and "ext4 (ejemplo)" in texto
+    assert velocidad.fila_disco.get_visible()
+    assert velocidad.fila_disco.get_title() == f"Medida en: {demo.disco_demo().etiqueta_corta} (ejemplo)"
+    assert f"  Medida en: {demo.disco_demo().etiqueta_corta}" in texto and "ATENCIÓN" not in texto
     assert sin_subprocesos == []  # ni pkexec, ni smartctl, ni fio, ni nada
 
 

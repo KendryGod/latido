@@ -9,6 +9,7 @@ from typing import Callable
 from gi.repository import Adw, Gio, GLib, GObject, Graphene, Gtk
 
 from latido.informe_txt import VelocidadMedida
+from latido.sistema.ubicacion import NO_SE_PUDO, disco_de_carpeta
 from latido.velocidad import formato
 from latido.velocidad.carpeta import espacio_necesario, margen, revisar_carpeta
 from latido.velocidad.ejecucion import Cancelado, Ejecucion, ErrorVelocidad
@@ -39,6 +40,7 @@ MEDICIONES = len(PRUEBAS) * len(ORDEN_DIRECCIONES)  # 8: cada prueba, en lectura
 ICONO_BIEN = "object-select-symbolic"
 ICONO_INFO = "dialog-information-symbolic"
 ICONO_AVISO = "dialog-warning-symbolic"
+ICONO_DISCO = "drive-harddisk-symbolic"
 
 
 @dataclass
@@ -51,6 +53,7 @@ class ServiciosVelocidad:
     leer_ultima_carpeta: Callable = leer_ultima_carpeta
     buscar_restos: Callable = buscar_restos
     borrar_resto: Callable = borrar_resto
+    ubicar_carpeta: Callable = disco_de_carpeta
 
 
 def _fila(titulo, subtitulo=None, icono=None):
@@ -179,12 +182,14 @@ class FilaPrueba:
 
 
 class PaginaVelocidad(Gtk.Box):
-    def __init__(self, servicios=None, demo=None):
+    def __init__(self, servicios=None, demo=None, obtener_discos=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.servicios = servicios or ServiciosVelocidad()
+        self._obtener_discos = obtener_discos or (lambda: [])
         self.modo_demo = demo is not None  # demo: VelocidadMedida de ejemplo; nunca se ejecuta fio
         self.carpeta = None
         self.revision = None
+        self.ubicacion = None
         self.estado_fio = None
         self.ejecucion = None
         self.en_marcha = False
@@ -194,7 +199,8 @@ class PaginaVelocidad(Gtk.Box):
         self._al_terminar = []
         self._parcial = None
         self._configuracion_en_marcha = None
-        self.velocidad_medida = None  # la última prueba terminada, para el informe TXT
+        self._disco_en_marcha = None
+        self.velocidad_medida = demo if self.modo_demo else None  # la última prueba terminada, para el informe TXT
 
         self.banner = Adw.Banner(revealed=False, button_label="Revisar…")
         self.banner.connect("button-clicked", self._al_pulsar_revisar_restos)
@@ -247,11 +253,14 @@ class PaginaVelocidad(Gtk.Box):
 
         # Antes de empezar.
         self.grupo_resumen = Adw.PreferencesGroup(title="Antes de empezar")
+        self.fila_disco = _fila(NO_SE_PUDO)
+        self.icono_disco = Gtk.Image(icon_name=ICONO_DISCO)
+        self.fila_disco.add_prefix(self.icono_disco)
         self.fila_fio = _fila("fio", "Se comprueba al abrir esta pestaña")
         self.fila_libre = _fila("Espacio libre", "—")
         self.fila_sistema = _fila("Sistema de archivos", "—")
         self.fila_escritura = _fila("Escritura máxima", "—")
-        for fila in (self.fila_fio, self.fila_libre, self.fila_sistema, self.fila_escritura):
+        for fila in (self.fila_disco, self.fila_fio, self.fila_libre, self.fila_sistema, self.fila_escritura):
             self.grupo_resumen.add(fila)
         self._filas_avisos = []
         caja.append(self.grupo_resumen)
@@ -318,7 +327,6 @@ class PaginaVelocidad(Gtk.Box):
 
         self._actualizar_resumen()
         if self.modo_demo:
-            self.velocidad_medida = demo
             self.fila_carpeta.set_subtitle("Modo demo: no se mide nada")
             self.mostrar_resultado(demo.resultado)
             self._mostrar_mensaje("Resultados de ejemplo. En el modo demo no se ejecuta fio.", ICONO_INFO)
@@ -443,6 +451,20 @@ class PaginaVelocidad(Gtk.Box):
         if self.carpeta is not None:
             self.revision = self.servicios.revisar_carpeta(self.carpeta, configuracion)
         info = self.revision.info if self.revision else None
+        if self.modo_demo and self.velocidad_medida.disco is not None:
+            self.fila_disco.set_title(f"Medida en: {self.velocidad_medida.disco.etiqueta_corta} (ejemplo)")
+            self.fila_disco.set_subtitle("En el modo demo no se mide ningún disco real.")
+            self.icono_disco.set_from_icon_name(ICONO_DISCO)
+            self.fila_disco.set_visible(True)
+        elif info is None:
+            self.ubicacion = None
+            self.fila_disco.set_visible(False)
+        else:
+            self.ubicacion = self.servicios.ubicar_carpeta(info.ruta, list(self._obtener_discos()))
+            self.fila_disco.set_title(self.ubicacion.texto_antes)
+            self.fila_disco.set_subtitle(self.ubicacion.motivo or "")
+            self.icono_disco.set_from_icon_name(ICONO_DISCO if self.ubicacion.disco is not None else ICONO_AVISO)
+            self.fila_disco.set_visible(True)
         if info is None or info.libre is None:
             self.fila_libre.set_subtitle("—")
         else:
@@ -516,6 +538,7 @@ class PaginaVelocidad(Gtk.Box):
         self.en_marcha = True
         self.banner.set_revealed(False)
         self._configuracion_en_marcha = configuracion
+        self._disco_en_marcha = self.ubicacion.disco if self.ubicacion else None
         self._parcial = ResultadoVelocidad(configuracion.pasadas)
         for celda in self._celdas():
             celda.limpiar()
@@ -584,8 +607,9 @@ class PaginaVelocidad(Gtk.Box):
         else:
             self.mostrar_resultado(resultado)
             info = self.revision.info if self.revision else None
-            self.velocidad_medida = VelocidadMedida(resultado, self._configuracion_en_marcha,
-                                                    info.tipo if info else None)
+            self.velocidad_medida = VelocidadMedida(
+                resultado, self._configuracion_en_marcha, info.tipo if info else None, disco=self._disco_en_marcha,
+            )
             limpieza = resultado.limpieza
             partes = ["Prueba terminada.", limpieza.texto() if limpieza else ""]
             if resultado.avisos or (limpieza is not None and not limpieza.completa):

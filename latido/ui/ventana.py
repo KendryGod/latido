@@ -35,7 +35,9 @@ class VentanaPrincipal(Adw.ApplicationWindow):
         self.pila = Adw.ViewStack()
         self.pagina_salud = PaginaSalud(discos, lector, error_deteccion, detectar=detectar)
         self.pila.add_titled_with_icon(self.pagina_salud, "salud", "Salud", "drive-harddisk-symbolic")
-        self.pagina_velocidad = PaginaVelocidad(servicios_velocidad, demo=velocidad_demo)
+        self.pagina_velocidad = PaginaVelocidad(
+            servicios_velocidad, demo=velocidad_demo, obtener_discos=lambda: self.pagina_salud._discos,
+        )
         self.pila.add_titled_with_icon(self.pagina_velocidad, "velocidad", "Velocidad", "power-profile-performance-symbolic")
 
         self.cabecera = Adw.HeaderBar()

@@ -9,7 +9,10 @@ import time
 
 import pytest
 
-from conftest import StatvfsFalso, descriptores_hacia, esperar, vivo
+from conftest import FIXTURES, StatvfsFalso, descriptores_hacia, esperar, vivo
+from latido.sistema.discos import Disco
+from latido.sistema.lectura import cargar_fixture
+from latido.sistema.ubicacion import NO_SE_PUDO, DiscoDeCarpeta, disco_de_carpeta
 from latido.velocidad.carpeta import InfoCarpeta, Revision, revisar_carpeta
 from latido.velocidad.ejecucion import Ejecucion
 from latido.velocidad.herramientas import EstadoFio
@@ -32,7 +35,12 @@ def _revisar_con_espacio(ruta, configuracion):
     return revisar_carpeta(ruta, configuracion, statvfs=lambda _ruta: StatvfsFalso(500 * GIB))
 
 
-def _servicios(fio_falso=None, estado_fio=None, revisar=_revisar_con_espacio, espia=None):
+def _sin_saber_el_disco(_ruta, _discos):
+    return DiscoDeCarpeta(None, "La carpeta está en tmpfs, que no está sobre un único disco.")
+
+
+def _servicios(fio_falso=None, estado_fio=None, revisar=_revisar_con_espacio, espia=None,
+               ubicar=_sin_saber_el_disco):
     from latido.ui.pagina_velocidad import ServiciosVelocidad
 
     espia = espia or Espia()
@@ -52,13 +60,14 @@ def _servicios(fio_falso=None, estado_fio=None, revisar=_revisar_con_espacio, es
         leer_ultima_carpeta=espia("leer_ultima_carpeta", base.leer_ultima_carpeta),
         buscar_restos=espia("buscar_restos", base.buscar_restos),
         borrar_resto=espia("borrar_resto", base.borrar_resto),
+        ubicar_carpeta=ubicar,
     )
 
 
-def _ventana(servicios):
+def _ventana(servicios, discos=()):
     from latido.ui.ventana import VentanaPrincipal
 
-    return VentanaPrincipal([], lambda disco: None, servicios_velocidad=servicios)
+    return VentanaPrincipal(list(discos), lambda disco: None, servicios_velocidad=servicios)
 
 
 def _abrir_pestana(ventana):
@@ -284,6 +293,87 @@ def test_prueba_completa_con_fio_falso(gtk, carpeta, fio_falso):
     assert pagina.boton.get_label() == "Iniciar" and pagina.boton.get_sensitive()
     assert os.listdir(carpeta) == []
     assert descriptores_hacia(carpeta) == []
+
+
+# --- en qué disco físico está la carpeta (Compuerta C2) ---
+
+NVME = Disco(nombre="nvme0n1", ruta="/dev/nvme0n1", ruta_lectura="/dev/nvme0", modelo="KINGSTON SNV2S1000G",
+             tamano=1000204886016, transporte="nvme", es_sistema=True, habilitado=True, aviso=None)
+USB = Disco(nombre="sdb", ruta="/dev/sdb", ruta_lectura=None, modelo="Disco USB", tamano=500107862016,
+            transporte="usb", es_sistema=False, habilitado=False, aviso="SATA y USB llegan en una próxima fase")
+
+
+def test_por_defecto_ubica_la_carpeta_con_sys():
+    from latido.ui.pagina_velocidad import ServiciosVelocidad
+
+    assert ServiciosVelocidad().ubicar_carpeta is disco_de_carpeta
+
+
+def test_sin_carpeta_no_dice_disco(gtk):
+    pagina = _abrir_pestana(_ventana(_servicios()))
+    assert not pagina.fila_disco.get_visible()
+
+
+def test_antes_de_iniciar_dice_que_disco_se_medira(gtk, carpeta):
+    vistas = []
+
+    def ubicar(ruta, discos):
+        vistas.append((ruta, [disco.nombre for disco in discos]))
+        return DiscoDeCarpeta(USB)
+
+    pagina = _abrir_pestana(_ventana(_servicios(ubicar=ubicar), [NVME, USB]))
+    pagina.elegir_carpeta(str(carpeta))
+    assert vistas[-1] == (str(carpeta), ["nvme0n1", "sdb"])  # los discos que conoce Salud
+    assert pagina.fila_disco.get_visible()
+    assert pagina.fila_disco.get_title() == f"Se medirá: {USB.etiqueta_corta}" == "Se medirá: Disco USB · 500.1 GB"
+    assert pagina.icono_disco.get_icon_name() == "drive-harddisk-symbolic"
+    assert pagina.boton.get_sensitive()
+
+
+def test_si_no_se_sabe_el_disco_lo_dice_y_no_adivina(gtk, carpeta):
+    pagina = _abrir_pestana(_ventana(_servicios(), [NVME, USB]))
+    pagina.elegir_carpeta(str(carpeta))
+    assert pagina.fila_disco.get_title() == NO_SE_PUDO == "No se pudo saber en qué disco está esta carpeta"
+    assert pagina.fila_disco.get_subtitle() == "La carpeta está en tmpfs, que no está sobre un único disco."
+    assert pagina.icono_disco.get_icon_name() == "dialog-warning-symbolic"  # ícono + palabra, nunca solo color
+    assert pagina.boton.get_sensitive()  # se puede medir igual; el informe lo dirá
+
+
+def test_carpeta_invalida_no_busca_su_disco(gtk):
+    vistas = []
+    pagina = _abrir_pestana(_ventana(_servicios(ubicar=lambda ruta, discos: vistas.append(ruta)), [NVME]))
+    pagina.elegir_carpeta("/dev/shm")
+    assert vistas == [] and not pagina.fila_disco.get_visible()
+
+
+def test_la_velocidad_medida_lleva_su_disco_y_el_informe_avisa(gtk, carpeta, fio_falso):
+    """Salud muestra el NVMe y la carpeta está en el USB: el TXT avisa en la primera línea de VELOCIDAD."""
+    GLib, _ = gtk
+    ventana = _ventana(_servicios(fio_falso, ubicar=lambda ruta, discos: DiscoDeCarpeta(discos[1])), [NVME, USB])
+    ventana.pagina_salud.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"), NVME)
+    pagina = _abrir_pestana(ventana)
+    pagina.elegir_carpeta(str(carpeta))
+    pagina.boton.emit("clicked")
+    esperar(GLib, lambda: not pagina.en_marcha, 30)
+    assert pagina.velocidad_medida.disco is USB
+    texto = ventana.texto_del_informe()
+    lineas = texto.splitlines()
+    velocidad = lineas[lineas.index("VELOCIDAD") + 1:]
+    assert velocidad[0] == "  ATENCIÓN: la velocidad se midió en otro disco que el de este informe."
+    assert velocidad[1] == "  Medida en: Disco USB · 500.1 GB"
+    assert str(carpeta) not in texto and str(carpeta.parent) not in texto  # ninguna ruta de la carpeta
+
+
+def test_la_velocidad_medida_en_el_disco_de_salud_no_avisa(gtk, carpeta, fio_falso):
+    GLib, _ = gtk
+    ventana = _ventana(_servicios(fio_falso, ubicar=lambda ruta, discos: DiscoDeCarpeta(NVME)), [NVME, USB])
+    ventana.pagina_salud.mostrar_informe(cargar_fixture(FIXTURES / "nvme_real.json"), NVME)
+    pagina = _abrir_pestana(ventana)
+    pagina.elegir_carpeta(str(carpeta))
+    pagina.boton.emit("clicked")
+    esperar(GLib, lambda: not pagina.en_marcha, 30)
+    texto = ventana.texto_del_informe()
+    assert "  Medida en: KINGSTON SNV2S1000G · 1.00 TB" in texto and "ATENCIÓN" not in texto
 
 
 def _esperar_que_duerma(GLib, fio_falso):

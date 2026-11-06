@@ -36,14 +36,60 @@ def _disco():
                  tamano=1000204886016, transporte="nvme", es_sistema=True, habilitado=True, aviso=None)
 
 
-def _velocidad():
+def _velocidad(disco="el de salud"):
+    """La velocidad medida con los fixtures de fio, en el disco que se diga (por defecto, el de _disco())."""
     resultado = ResultadoVelocidad(1)
     for prueba in PRUEBAS:
         for direccion in Direccion:
             paso = Paso(prueba, direccion, 1)
             texto = (FIO / f"{paso.trabajo}.json").read_text(encoding="utf-8")
             resultado.agregar(paso, leer_salida_fio(texto, 0, "", paso.trabajo, direccion))
-    return VelocidadMedida(resultado, Configuracion(256 * MIB, 1), "btrfs")
+    return VelocidadMedida(resultado, Configuracion(256 * MIB, 1), "btrfs",
+                           disco=_disco() if disco == "el de salud" else disco)
+
+
+def _seccion_velocidad(texto):
+    lineas = texto.splitlines()
+    return lineas[lineas.index("VELOCIDAD") + 1:]
+
+
+AVISO_OTRO_DISCO = "  ATENCIÓN: la velocidad se midió en otro disco que el de este informe."
+USB = Disco(nombre="sdb", ruta="/dev/sdb", ruta_lectura=None, modelo="Disco USB", tamano=500107862016,
+            transporte="usb", es_sistema=False, habilitado=False, aviso=None)
+
+
+def test_velocidad_dice_en_que_disco_se_midio():
+    texto = construir_texto(analizar(cargar("nvme_real.json")), _disco(), _velocidad(), fecha=FECHA)
+    assert _seccion_velocidad(texto)[0] == f"  Medida en: {_disco().etiqueta_corta}"
+    assert "ATENCIÓN" not in texto
+
+
+def test_velocidad_en_otro_disco_avisa_en_la_primera_linea():
+    texto = construir_texto(analizar(cargar("nvme_real.json")), _disco(), _velocidad(USB), fecha=FECHA)
+    seccion = _seccion_velocidad(texto)
+    assert seccion[0] == AVISO_OTRO_DISCO
+    assert seccion[1] == f"  Medida en: {USB.etiqueta_corta}"
+    assert texto.count("ATENCIÓN") == 1
+
+
+def test_mismo_modelo_y_capacidad_pero_otro_disco_tambien_avisa():
+    """Dos discos iguales: se distinguen por el dispositivo, no por la etiqueta."""
+    gemelo = Disco(**{**_disco().__dict__, "nombre": "nvme1n1", "ruta": "/dev/nvme1n1", "ruta_lectura": "/dev/nvme1"})
+    assert gemelo.etiqueta_corta == _disco().etiqueta_corta
+    texto = construir_texto(analizar(cargar("nvme_real.json")), _disco(), _velocidad(gemelo), fecha=FECHA)
+    assert _seccion_velocidad(texto)[0] == AVISO_OTRO_DISCO
+
+
+def test_velocidad_sin_saber_el_disco():
+    texto = construir_texto(analizar(cargar("nvme_real.json")), _disco(), _velocidad(None), fecha=FECHA)
+    seccion = _seccion_velocidad(texto)
+    assert seccion[0].startswith("  No se pudo saber en qué disco")
+    assert "Medida en:" not in texto and "ATENCIÓN" not in texto
+
+
+def test_sin_velocidad_no_dice_disco():
+    texto = construir_texto(analizar(cargar("nvme_real.json")), _disco(), None, fecha=FECHA)
+    assert _seccion_velocidad(texto) == ["  Sin una prueba de velocidad terminada en esta sesión."]
 
 
 def test_contenido_de_referencia_con_el_fixture_real():

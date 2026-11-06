@@ -89,7 +89,7 @@ def velocidad_demo():
                     bytes_por_segundo=bytes_por_segundo, iops=iops, bytes_totales=configuracion.tamano,
                     milisegundos=1_000, latencia_ns=prueba.cola / iops * 1e9,  # ley de Little, cola llena
                 ))
-    return VelocidadMedida(resultado, configuracion, "ext4 (ejemplo)")
+    return VelocidadMedida(resultado, configuracion, "ext4 (ejemplo)", disco=disco_demo())
 
 
 def servicios_velocidad_demo():
@@ -106,4 +106,5 @@ def servicios_velocidad_demo():
         leer_ultima_carpeta=lambda: None,
         buscar_restos=lambda carpeta: [],
         borrar_resto=sin_fio,
+        ubicar_carpeta=sin_fio,
     )

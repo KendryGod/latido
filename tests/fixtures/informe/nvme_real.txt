@@ -95,6 +95,7 @@ TODOS LOS DATOS
     es mayor que 0, Latido lo marca como PRECAUCIÓN.
 
 VELOCIDAD
+  Medida en: KINGSTON SNV2S1000G · 1.00 TB
   Archivo de prueba de 256 MiB, 1 pasada, sistema de archivos btrfs. MB/s =
   1,000,000 bytes por segundo; el número es el promedio de las pasadas.
   Latencia: tiempo medio de cada operación.

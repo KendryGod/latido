@@ -16,6 +16,7 @@ from latido.salud.autenticidad import evaluar_autenticidad
 from latido.salud.cifras import SIN_VALOR, cifras_clave
 from latido.salud.modelo import FRASE_ESTADO, TEXTO_ESTADO, Estado
 from latido.salud.reglas import POR_ID
+from latido.sistema.ubicacion import mismo_disco
 from latido.velocidad import formato as formato_velocidad
 from latido.velocidad.pruebas import PRUEBAS, Direccion
 
@@ -36,6 +37,7 @@ class VelocidadMedida:
     resultado: object  # ResultadoVelocidad
     configuracion: object  # Configuracion
     sistema_archivos: str | None
+    disco: object = None  # Disco donde estaba la carpeta, o None si no se pudo saber
 
 
 def nombre_por_defecto(fecha):
@@ -128,11 +130,17 @@ def _seccion_datos(informe):
     return lineas
 
 
-def _seccion_velocidad(velocidad):
+def _seccion_velocidad(velocidad, disco=None):
     lineas = ["", "VELOCIDAD"]
     if velocidad is None:
         lineas.append("  Sin una prueba de velocidad terminada en esta sesión.")
         return lineas
+    if velocidad.disco is None:
+        lineas += _envolver("No se pudo saber en qué disco se midió.")
+    else:
+        if disco is not None and not mismo_disco(velocidad.disco, disco):
+            lineas += _envolver("ATENCIÓN: la velocidad se midió en otro disco que el de este informe.")
+        lineas += _envolver(f"Medida en: {velocidad.disco.etiqueta_corta}")
     configuracion = velocidad.configuracion
     sistema = velocidad.sistema_archivos or "no se pudo saber"
     lineas += _envolver(
@@ -172,7 +180,7 @@ def construir_texto(informe, disco=None, velocidad=None, fecha=None, demo=False)
     lineas += _seccion_cifras(informe)
     lineas += _seccion_autenticidad(informe, disco)
     lineas += _seccion_datos(informe)
-    lineas += _seccion_velocidad(velocidad)
+    lineas += _seccion_velocidad(velocidad, disco)
     if demo:
         lineas += ["", MARCA_DEMO]
     return "\n".join(lineas) + "\n"
